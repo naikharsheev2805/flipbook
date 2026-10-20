@@ -1,6 +1,5 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel=manifest href=manifest.webmanifest><meta name=theme-color content="#0e1017"><link rel=apple-touch-icon href=apple-touch-icon.png><meta name=mobile-web-app-capable content=yes><meta name=apple-mobile-web-app-capable content=yes><meta name=apple-mobile-web-app-title content="Flipbook"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>Flipbook Studio</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Roboto:wght@400;500;700&display=swap">
 <style>
 /* Layout: dark drawing-studio shell. Home = shelf of paper cards; Editor = tool rail | stage | side panel, with a frame strip underneath. */
@@ -704,6 +703,11 @@ function hiResLayerBitmap(src,l,ops,ctx,xf){
     const key=hiResLayerCacheKey(src.id,l.id,W,H,p.w,p.h,bucket,cel,ops),sig=[src.id,l.id,W,H,p.w,p.h,cel?1:0,ops.length].join('|');
     let entry=highResLayerCache.get(key);
     if(entry){highResLayerCache.delete(key);highResLayerCache.set(key,entry);return entry;}
+    const s0=[src.id,l.id,p.w,p.h,bucket,cel?1:0].join('|');
+    {// Append-only fast path: draw just the newly added strokes onto the cached bitmap instead of replaying every stroke.
+      let cand=null;for(const e of highResLayerCache.values()){if(e.full&&e.s0===s0&&e.n&&e.n<ops.length&&ops[0]===e.first&&ops[e.n-1]===e.last&&(!cand||e.n>cand.n))cand=e;}
+      if(cand){const bc=cand.canvas.getContext('2d');bc.setTransform(bucket,0,0,bucket,0,0);for(let i=cand.n;i<ops.length;i++)renderVectorOp(bc,ops[i],p);bc.setTransform(1,0,0,1,0,0);
+        highResLayerCache.delete(cand.key);cand.n=ops.length;cand.last=ops[ops.length-1];cand.key=key;cand.sig=sig;cacheHiResLayer(key,cand);return cand;}}
     const nowT=performance.now();
     if(Math.abs(scale-hrLastScale)>1e-6){hrLastScale=scale;hrChangeT=nowT;}
     if(nowT-hrChangeT<160){
@@ -717,7 +721,7 @@ function hiResLayerBitmap(src,l,ops,ctx,xf){
     if(cel){bc.imageSmoothingEnabled=true;bc.imageSmoothingQuality='high';bc.drawImage(cel,0,0);}
     for(const op of ops)renderVectorOp(bc,op,p);
     bc.setTransform(1,0,0,1,0,0);
-    entry={canvas:bitmap,scale:bucket,originX:0,originY:0,full:true,sig:sig};
+    entry={canvas:bitmap,scale:bucket,originX:0,originY:0,full:true,sig:sig,s0:s0,key:key,n:ops.length,first:ops[0],last:ops[ops.length-1]};
     cacheHiResLayer(key,entry);return entry;
   }
   // Very large projects/zoom levels use a viewport-sized fallback so one cache
@@ -824,10 +828,19 @@ function tinted(ctx,fi,color,alpha,onlyLayerId=null,hiResVectors=false){
   ctx.save();ctx.globalAlpha=alpha;ctx.drawImage(t,0,0);ctx.restore();}
 let paperTile=null;
 function paintTransparentPaper(ctx,p){if(!paperTile){paperTile=mk(24,24);const t=paperTile.getContext('2d');t.fillStyle='#f3f4f7';t.fillRect(0,0,24,24);t.fillStyle='#d8dbe2';t.fillRect(0,0,12,12);t.fillRect(12,12,12,12);}ctx.fillStyle=ctx.createPattern(paperTile,'repeat');ctx.fillRect(0,0,p.w,p.h);}
+function onionLoops(ctx,fi,hi){const p=S.proj,n=S.onion,onlyLayerId=n.activeLayerOnly&&p.layers[S.li]?p.layers[S.li].id:null;
+  for(let k=n.b;k>=1;k--){const j=fi-k;if(j>=0)tinted(ctx,j,n.prevColor||'#ff4d4d',n.o/100*Math.pow(n.fade==null?.72:n.fade,k-1),onlyLayerId,hi);}
+  for(let k=n.a;k>=1;k--){const j=fi+k;if(j<p.frames.length)tinted(ctx,j,n.nextColor||'#35c46a',n.o/100*Math.pow(n.fade==null?.72:n.fade,k-1),onlyLayerId,hi);}}
+/* Onion frames can't change mid-stroke, so tint them once per stroke instead of on every animation frame. */
+function onionCached(ctx,fi){const p=S.proj,n=S.onion,xf=ctx.getTransform(),W=ctx.canvas.width,H=ctx.canvas.height,
+  key=[W,H,xf.a,xf.b,xf.c,xf.d,xf.e,xf.f,fi,S.li,p.frames.length,n.b,n.a,n.o,n.fade,n.prevColor,n.nextColor,n.activeLayerOnly].join('|');
+  if(!onionCache||onionCache.key!==key){const c=mk(W,H),cc=c.getContext('2d',{alpha:true,desynchronized:true});cc.setTransform(xf.a,xf.b,xf.c,xf.d,xf.e,xf.f);onionLoops(cc,fi,true);onionCache={key,c};}
+  ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(onionCache.c,0,0);ctx.restore();}
 function composite(ctx,fi,o={}){const p=S.proj;ctx.clearRect(0,0,p.w,p.h);
   if(!o.noPaper){if(p.paper==='transparent'&&!o.forcePaper)paintTransparentPaper(ctx,p);else{ctx.fillStyle=p.paper==='transparent'?'#fff':p.paper;ctx.fillRect(0,0,p.w,p.h);}}
   if(o.bg!==false)drawBg(ctx,bgFor(fi),p.w,p.h,o);
-  if(o.onion&&S.onion.on){const n=S.onion,onlyLayerId=n.activeLayerOnly&&p.layers[S.li]?p.layers[S.li].id:null;
+  if(o.onion&&S.onion.on&&o.live&&o.hiResVectors){onionCached(ctx,fi);}
+  else if(o.onion&&S.onion.on){const n=S.onion,onlyLayerId=n.activeLayerOnly&&p.layers[S.li]?p.layers[S.li].id:null;
     for(let k=n.b;k>=1;k--){const j=fi-k;if(j>=0)tinted(ctx,j,n.prevColor||'#ff4d4d',n.o/100*Math.pow(n.fade==null?.72:n.fade,k-1),onlyLayerId,!!o.hiResVectors);}
     for(let k=n.a;k>=1;k--){const j=fi+k;if(j<p.frames.length)tinted(ctx,j,n.nextColor||'#35c46a',n.o/100*Math.pow(n.fade==null?.72:n.fade,k-1),onlyLayerId,!!o.hiResVectors);}}
   drawLayers(ctx,fi,o);
@@ -837,12 +850,22 @@ function composite(ctx,fi,o={}){const p=S.proj;ctx.clearRect(0,0,p.w,p.h);
 function flatten(fi,scale=1,o={}){const p=S.proj,c=scale===1?mk(p.w,p.h):mk(p.w*scale,p.h*scale),x=c.getContext('2d');x.imageSmoothingQuality='high';if(scale!==1)x.scale(scale,scale);composite(x,fi,{forcePaper:o.paper,bg:o.bg,noPaper:o.noPaper,exporting:!!o.exporting});return c;}
 
 /* ===== render loop ===== */
-let rq=false;const view=()=>$('#view'),fx=()=>$('#fx');
-function needsRender(){if(rq)return;rq=true;requestAnimationFrame(()=>{rq=false;if(S.view==='editor')renderView();});}
-function renderView(){const p=S.proj;if(!p)return;const v=view(),ctx=v.getContext('2d',{alpha:true,desynchronized:true}),d=window.devicePixelRatio||1;
+let rq=false,vgT=0,lastRT=0,onionCache=null;const view=()=>$('#view'),fx=()=>$('#fx');
+function needsRender(){if(rq)return;rq=true;const go=()=>{
+  // Heavy path-replay brushes: never let rendering starve input; skip frames when the last render was slow.
+  if(S.stroke&&!S.stroke.previewCanvas&&(S.rt||0)>10&&performance.now()-lastRT<Math.min(70,S.rt*.9)){requestAnimationFrame(go);return;}
+  rq=false;if(S.view==='editor')renderView();};requestAnimationFrame(go);}
+function renderView(){const p=S.proj;if(!p)return;if(S.vg){S.vg=false;clearTimeout(vgT);}const t0=performance.now();const v=view(),ctx=v.getContext('2d',{alpha:true,desynchronized:true}),d=window.devicePixelRatio||1;v.style.transform='none';S.rv={z:S.zoom,tx:S.tx,ty:S.ty};{const fe=fx();if(fe)fe.style.opacity='';}
   ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,v.width,v.height);ctx.setTransform(d*S.zoom,0,0,d*S.zoom,d*S.tx,d*S.ty);
   composite(ctx,S.playing?S.playFi:S.fi,{onion:!S.playing,grid:!S.playing,guides:!S.playing,live:S.playing?null:S.stroke,hiResVectors:true});
-  if(typeof drawFx==='function')drawFx();}
+  if(typeof drawFx==='function')drawFx();S.rt=performance.now()-t0;lastRT=performance.now();}
+/* Zoom/pan engine: while a gesture is moving, GPU-transform the last rendered frame (no re-render, no lag);
+   re-rasterise once, sharply, when the gesture settles. */
+function viewMoved(){const v=view();if(!v||!S.rv){applyViewT();return;}const b=S.rv,k=S.zoom/b.z;S.vg=true;
+  v.style.transformOrigin='0 0';v.style.willChange='transform';v.style.transform='translate('+(S.tx-k*b.tx)+'px,'+(S.ty-k*b.ty)+'px) scale('+k+')';
+  const f=fx();if(f)f.style.opacity='0';const zp=$('#zpct');if(zp)zp.textContent=Math.round(S.zoom*100)+'%';
+  clearTimeout(vgT);vgT=setTimeout(settleView,140);}
+function settleView(){clearTimeout(vgT);if(S.vg&&S.view==='editor')renderView();}
 function applyViewT(){view().style.transform='none';const zp=$('#zpct');if(zp)zp.textContent=Math.round(S.zoom*100)+'%';needsRender();}
 /* overlay canvas is screen-sized (device pixels) so selection handles, guides and the brush cursor stay sharp at any zoom */
 function sizeFx(){const w=$('#stagewrap'),f=fx();if(!w||!f)return;const r=w.getBoundingClientRect(),d=window.devicePixelRatio||1,W=Math.max(1,Math.round(r.width*d)),H=Math.max(1,Math.round(r.height*d));if(f.width!==W||f.height!==H){f.width=W;f.height=H;}f.style.width=r.width+'px';f.style.height=r.height+'px';f.style.transform='none';}
@@ -975,23 +998,34 @@ function stampCalligraphyPreview(s,x,y,pressure,prev){
   c.restore();
 }
 function strokeTo(rx,ry,rp){const s=S.stroke;if(!s)return;s.raw=[rx,ry];needsRender();
-  // Make the Smooth preset meaningfully stronger at ordinary slider values,
-  // while retaining the slider as the user's overall control.
+  // Stabilizer slider keeps its meaning. Smoothing is strong for slow, precise motion but is relaxed as the pointer
+  // moves away from the nib, so fast strokes never trail behind the finger/pen (adaptive lag cap).
   const modeFactor=S.stabMode==='responsive'?.58:S.stabMode==='smooth'?3:1;
-  const effective=clamp(S.stab*modeFactor,0,95),k=1-effective/100*.93;
+  const effective=clamp(S.stab*modeFactor,0,95),k0=1-effective/100*.93;
+  const dist=Math.hypot(rx-s.sm.x,ry-s.sm.y)*S.zoom,k=Math.min(1,k0+(1-k0)*(1-Math.exp(-dist/(26+effective*.5)))*.55);
   s.sm.x+=(rx-s.sm.x)*k;s.sm.y+=(ry-s.sm.y)*k;
-  s.sm.p+=(rp-s.sm.p)*Math.max(.18,k);moveStamp(s.sm.x,s.sm.y,s.sm.p);
+  s.sm.p+=(rp-s.sm.p)*Math.max(.18,k);curveStamp(s,s.sm.x,s.sm.y,s.sm.p);
+}
+/* Stamp along a quadratic through midpoints (C1-continuous) rather than straight chords, so live strokes
+   have no polygon corners and match the smoothed committed vector. */
+function curveStamp(s,x,y,p){
+  if(!s.ctl){s.ctl={x:s.last.x,y:s.last.y,p:s.last.p};s.mid={x:s.last.x,y:s.last.y,p:s.last.p};}
+  const c=s.ctl,m=s.mid,nx=(c.x+x)/2,ny=(c.y+y)/2,np=(c.p+p)/2,step=Math.max(.75,s.st.size*s.b.sp)*(S.proj.q||1),
+    len=Math.hypot(c.x-m.x,c.y-m.y)+Math.hypot(nx-c.x,ny-c.y),n=Math.min(64,Math.max(1,Math.ceil(len/step)));
+  for(let i=1;i<=n;i++){const t=i/n,u=1-t,a=u*u,b=2*u*t,d=t*t;moveStamp(a*m.x+b*c.x+d*nx,a*m.y+b*c.y+d*ny,a*m.p+b*c.p+d*np);}
+  s.mid={x:nx,y:ny,p:np};s.ctl={x,y,p};
 }
 function moveStamp(x,y,p){const s=S.stroke,dx=x-s.last.x,dy=y-s.last.y,d=Math.hypot(dx,dy),step=Math.max(.75,s.st.size*s.b.sp)*(S.proj.q||1);if(d<step)return;const n=Math.floor(d/step);for(let i=1;i<=n;i++){const t=i/n;stampAt(s.last.x+dx*t,s.last.y+dy*t,s.last.p+(p-s.last.p)*t);}s.last={x:s.last.x+dx*(n/n),y:s.last.y+dy*(n/n),p};needsRender();}
 function strokeEnd(e){const s=S.stroke;if(!s)return;
   // Route the release point through the same stabilizer as every other sample;
   // using the raw pointer here can create a jagged final tail.
   if(e){const [x,y]=toCanvasXY(e);strokeTo(x,y,s.last.p);}
+  curveStamp(s,s.sm.x,s.sm.y,s.sm.p);
   // Always commit the final filtered point, even when it is closer than the
   // normal brush spacing, so short strokes and stroke endings aren't clipped.
   if(Math.hypot(s.sm.x-s.last.x,s.sm.y-s.last.y)>.12)stampAt(s.sm.x,s.sm.y,s.sm.p);
-  const op={type:'brush',brush:s.brushId,color:s.st.color,size:s.st.size,opacity:s.opacity,commit:s.b.commit,q:S.proj.q||1,sym:s.sym,seed:s.seed,points:s.points.slice(),erase:!!s.b.erase};S.stroke=null;appendVector(F(),s.l,op);needsRender();}
-function strokeCancel(){if(!S.stroke)return;S.stroke=null;needsRender();}
+  onionCache=null;const op={type:'brush',brush:s.brushId,color:s.st.color,size:s.st.size,opacity:s.opacity,commit:s.b.commit,q:S.proj.q||1,sym:s.sym,seed:s.seed,points:s.points.slice(),erase:!!s.b.erase};S.stroke=null;appendVector(F(),s.l,op);needsRender();}
+function strokeCancel(){if(!S.stroke)return;S.stroke=null;onionCache=null;needsRender();}
 
 /* ===== vector path rendering ===== */
 let vecScratch=null,vecScratchUsed=null,layerScratchC=null;
@@ -1303,7 +1337,7 @@ function initStage(){const st=$('#stage');
   // Touch gestures have ONE source of truth: Touch Events snapshots. Pointer Events
   // remain responsible for drawing and mouse/pen input, but never calculate a pinch.
   let touchGesture=null;
-  st.addEventListener('pointerdown',e=>{if(S.playing)return;if(motionPathMode){const [mx,my]=toCanvasXY(e);S.proj.motionPath=S.proj.motionPath||[];S.proj.motionPath.push({x:mx,y:my});markDoc();needsRender();e.preventDefault();return;}
+  st.addEventListener('pointerdown',e=>{settleView();if(S.playing)return;if(motionPathMode){const [mx,my]=toCanvasXY(e);S.proj.motionPath=S.proj.motionPath||[];S.proj.motionPath.push({x:mx,y:my});markDoc();needsRender();e.preventDefault();return;}
     try{st.setPointerCapture(e.pointerId);}catch(_){}
     ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY,type:e.pointerType});
     if(e.pointerType==='pen')S.penSeen=true;
@@ -1324,7 +1358,7 @@ function initStage(){const st=$('#stage');
       const touchCount=[...ptrs.values()].filter(v=>v.type==='touch').length;
       if(touchCount>=2)return;
     }else{S.hover=toCanvasXY(e);if(!activeTool)needsRender();}
-    if(panning&&panning.id===e.pointerId){S.tx=panning.tx+e.clientX-panning.x;S.ty=panning.ty+e.clientY-panning.y;applyViewT();return;}
+    if(panning&&panning.id===e.pointerId){S.tx=panning.tx+e.clientX-panning.x;S.ty=panning.ty+e.clientY-panning.y;viewMoved();return;}
     if(activeTool)toolMove(e);});
   const up=e=>{ptrs.delete(e.pointerId);
     if(e.pointerType==='touch'&&touchGesture)return;
@@ -1357,7 +1391,7 @@ function initStage(){const st=$('#stage');
     const anchorX=(touchGesture.startMx-touchGesture.startTx)/touchGesture.startZoom;
     const anchorY=(touchGesture.startMy-touchGesture.startTy)/touchGesture.startZoom;
     S.zoom=z;S.tx=mx-anchorX*z;S.ty=my-anchorY*z;
-    applyViewT();
+    viewMoved();
   },{passive:false});
   const finishTouch=e=>{
     if(touchGesture){const ids=new Set([...e.touches].map(t=>t.identifier));
@@ -1369,7 +1403,7 @@ function initStage(){const st=$('#stage');
   st.addEventListener('contextmenu',e=>e.preventDefault());
   st.addEventListener('wheel',e=>{e.preventDefault();const r=stageRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
     if(e.ctrlKey||e.metaKey||Math.abs(e.deltaY)>0&&!e.shiftKey){const k=Math.exp(-e.deltaY*(e.ctrlKey?.01:.0015)),z=clamp(S.zoom*k,.1,16),cx=(mx-S.tx)/S.zoom,cy=(my-S.ty)/S.zoom;S.zoom=z;S.tx=mx-cx*z;S.ty=my-cy*z;}
-    else{S.tx-=e.deltaX;S.ty-=e.deltaY;}applyViewT();needsRender();},{passive:false});
+    else{S.tx-=e.deltaX;S.ty-=e.deltaY;}viewMoved();},{passive:false});
   $('#stagewrap').addEventListener('pointerdown',closeOpts,true);const zb=$('#stagebtns'),setZC=c=>{zb.classList.toggle('collapsed',c);$('#zcollapse').setAttribute('aria-expanded',String(!c));$('#zcollapse').setAttribute('aria-label',c?'Expand zoom controls':'Collapse zoom controls');lsSet('fb.zoomCollapsed',c);};setZC(!!lsGet('fb.zoomCollapsed',false));$('#zcollapse').onclick=()=>setZC(!zb.classList.contains('collapsed'));
   $('#zout').onclick=()=>zoomBy(1/1.25);$('#zhand').onclick=()=>{S.hand=!S.hand;$('#zhand').setAttribute('aria-pressed',String(S.hand));$('#zhand').classList.toggle('on',S.hand);$('#stagewrap').style.cursor=S.hand?'grab':'';};$('#zin').onclick=()=>zoomBy(1.25);$('#zfit').onclick=()=>{fitView();needsRender();};
   window.addEventListener('resize',()=>{if(S.view==='editor'){sizeCanvases();fitView();needsRender();}});
@@ -1380,7 +1414,7 @@ function initStage(){const st=$('#stage');
     if(k==='arrowleft'){gotoFrame(S.fi-1);}else if(k==='arrowright'){gotoFrame(S.fi+1);}else if(k==='enter'){togglePlay();}
     else if(k==='['){setSize(S.size-2);}else if(k===']'){setSize(S.size+2);}});
   document.addEventListener('keyup',e=>{if(e.key===' ')spaceDown=false;});}
-function zoomBy(k){const r=stageRect(),mx=r.width/2,my=r.height/2,cx=(mx-S.tx)/S.zoom,cy=(my-S.ty)/S.zoom,z=clamp(S.zoom*k,.1,16);S.zoom=z;S.tx=mx-cx*z;S.ty=my-cy*z;applyViewT();needsRender();}
+function zoomBy(k){const r=stageRect(),mx=r.width/2,my=r.height/2,cx=(mx-S.tx)/S.zoom,cy=(my-S.ty)/S.zoom,z=clamp(S.zoom*k,.1,16);S.zoom=z;S.tx=mx-cx*z;S.ty=my-cy*z;viewMoved();}
 
 /* ===== tool rail, options, brush + colour pickers ===== */
 document.querySelector('svg defs').insertAdjacentHTML('beforeend','<symbol id="i-move" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></symbol>');
@@ -1800,7 +1834,6 @@ async function deleteProject(id){await dbDel('projects',id);for(const k of await
 document.addEventListener('visibilitychange',()=>{if(document.hidden){clearTimeout(saveT);saveNow();}});window.addEventListener('pagehide',()=>{clearTimeout(saveT);saveNow();});
 
 /* ===== exporters: GIF (own encoder), video, PNG zip, project backup ===== */
-let DL=null;
 function median(frames,w,h,reserve){const hist=new Map(),step=Math.max(1,Math.floor(frames.length*w*h/90000));
   for(const f of frames){const d=f.data;for(let i=0;i<d.length;i+=4*step){if(d[i+3]<128)continue;const k=(d[i]>>3)<<10|(d[i+1]>>3)<<5|(d[i+2]>>3);hist.set(k,(hist.get(k)||0)+1);}}
   let cols=[...hist].map(([k,n])=>({r:k>>10&31,g:k>>5&31,b:k&31,n}));if(!cols.length)cols=[{r:31,g:31,b:31,n:1}];
@@ -1834,7 +1867,14 @@ function zipBlob(files){const parts=[],cen=[];let off=0;const enc=new TextEncode
   let cs=0;cen.forEach(x=>cs+=x.length);const end=dv(22,b=>{b.setUint32(0,0x06054b50,true);b.setUint16(8,files.length,true);b.setUint16(10,files.length,true);b.setUint32(12,cs,true);b.setUint32(16,off,true);});
   return new Blob([...parts,...cen,end],{type:'application/zip'});}
 const safeName=()=>(S.proj.name||'animation').replace(/[^\w\- ]+/g,'').trim().replace(/\s+/g,'-')||'animation';
-async function saveFile(name,data){if(!DL){toast('Saving files needs the claude.ai viewer');return false;}try{const r=await DL.save({filename:name,data});toast(r.status==='saved'?'Saved '+name:'Sent '+name);return true;}catch(e){if(e&&e.code==='declined')return false;toast(e&&e.code==='too_large'?'File too large. Pick a smaller size.':'Could not save that file');return false;}}
+async function saveFile(name,data){try{
+  const mime=/\.gif$/i.test(name)?'image/gif':/\.png$/i.test(name)?'image/png':/\.mp4$/i.test(name)?'video/mp4':/\.webm$/i.test(name)?'video/webm':/\.zip$/i.test(name)?'application/zip':/\.json$/i.test(name)?'application/json':'application/octet-stream';
+  const blob=data instanceof Blob?data:new Blob([data],{type:mime});
+  const url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download=name;a.rel='noopener';a.style.display='none';document.body.appendChild(a);a.click();
+  setTimeout(()=>{a.remove();URL.revokeObjectURL(url);},4000);
+  toast('Saved '+name);return true;
+ }catch(e){toast('Could not save that file');return false;}}
 function exportFrame(i,o){const sc=o.scale;return flatten(i,sc,{paper:!o.transparent,bg:o.bg,noPaper:o.transparent,exporting:true});}
 function exportIndices(o){return o&&o.range?frameIndices(true):S.proj.frames.map((_,i)=>i);}
 function progressUI(title){const m=modal(`<h3>${title}</h3><div class="prog"><i></i></div><p class="hint" id="pt">Starting…</p><div class="row"><button class="btn" id="cx">Cancel</button></div>`);const o={cancel:false,set:(f,t)=>{$('.prog i',m.el).style.width=(f*100)+'%';if(t)$('#pt',m.el).textContent=t;},close:m.close};$('#cx',m.el).onclick=()=>{o.cancel=true;m.close();};m.scrim.addEventListener('pointerdown',e=>{if(e.target===m.scrim)o.cancel=true;});return o;}
@@ -1880,7 +1920,7 @@ function openExport(){stopPlay();commitFloat();const p=S.proj,hasBg=!!(p.bg||p.f
    <div class="exgrid"><button class="btn" id="xg">${ic('image')}<span>GIF<small>Loops anywhere, no watermark</small></span></button><button class="btn" id="xv">${ic('video')}<span>Video<small>MP4 or WebM, with your sound</small></span></button>
    <button class="btn" id="xz">${ic('layers')}<span>PNG frames<small>One image per frame, zipped</small></span></button><button class="btn" id="xp">${ic('image')}<span>This frame<small>A single PNG</small></span></button>
    <button class="btn" id="xb">${ic('save')}<span>Project backup<small>.json you can open again</small></span></button></div>
-   ${DL?'':'<p class="hint">Saving files needs the claude.ai viewer. Everything else works here.</p>'}`);
+   `);
   const opts=()=>({scale:+($('#xs [aria-pressed=true]',m.el)?.dataset.s||1),bg:$('#xbg',m.el).checked,transparent:$('#xtr',m.el).checked,range:$('#xrange',m.el).checked});
   $$('#xs button',m.el).forEach(b=>{if(b.dataset.s==='1')b.setAttribute('aria-pressed','true');else b.setAttribute('aria-pressed','false');b.onclick=()=>$$('#xs button',m.el).forEach(x=>x.setAttribute('aria-pressed',x===b));});
   const go=fn=>()=>{const o=opts();m.close();fn(o);};$('#xg',m.el).onclick=go(doGIF);$('#xv',m.el).onclick=go(doVideo);$('#xz',m.el).onclick=go(doZip);$('#xp',m.el).onclick=go(doPNG);$('#xb',m.el).onclick=go(()=>doBackup());}
@@ -1967,9 +2007,10 @@ async function boot(){initPalette();S.penOnly=lsGet('fb.penonly',false);const on
   $('#ed-back').onclick=goHome;$('#ed-export').onclick=openExport;$('#ed-settings').onclick=settingsDialog;$('#ed-name').onclick=settingsDialog;$('#ed-tools-menu').onclick=e=>{const actions=[['Grid on/off','ed-grid'],['Fullscreen','ed-full'],['Settings','ed-settings'],['Auto in-betweens','t-tween'],['Playback & export range','t-range'],['Compare frames','t-compare'],['Multi-frame editing','t-multi'],['Animation plan','t-plan'],['Perspective guides','t-perspective'],['Motion path guide','t-motion'],['Import image sequence','t-seq']];const menu=document.createElement('div');menu.className='menu';menu.id='toolsMenu';actions.forEach(([label,id])=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=()=>{pop.close();$('#'+id).click();};menu.appendChild(b);});const pop=popover(e.currentTarget,menu);};
   $('#hm-new').onclick=newDialog;$('#hm-import').onclick=()=>$('#fileProject').click();$('#fileProject').onchange=e=>{const f=e.target.files[0];e.target.value='';if(f)importBackup(f);};
   await renderHome();checkStorageHealth();await offerSessionRecovery();
-  try{if(window.claude&&window.claude.use){const d=await window.claude.use('downloads');if(d)DL=d;}}catch(e){}}
+  }
 boot();
 })();
 </script>
+<script>if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'))addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));</script>
 
 </body></html>
