@@ -377,6 +377,26 @@ body{font-size:14px;letter-spacing:0}
   .optbar{left:12px;top:52px}
   .work,.work.noside,.work.focus{padding-left:0}
 }
+/* Collapsible tool bar, collapsible/resizable timeline, onion card */
+.rcol{flex:none;width:30px;align-self:stretch;min-height:44px;display:grid;place-items:center;color:var(--mut);border-radius:12px}
+.rcol:hover{background:var(--surface2)}
+.rcol .chev2{display:block;width:9px;height:9px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(135deg);margin-left:3px;transition:transform .15s}
+.rail.collapsed .rcol .chev2{transform:rotate(-45deg);margin-left:-3px}
+.rail.collapsed>*:not(.rgrip):not(.rcol){display:none}
+.tlgrip{flex:none;align-self:stretch;height:20px;margin-top:-4px;display:grid;place-items:center;cursor:ns-resize;touch-action:none;user-select:none}
+.tlgrip::before{content:"";width:52px;height:5px;border-radius:3px;background:var(--line)}
+.tlgrip:hover::before{background:var(--mut)}
+.fr{width:var(--frw,92px)}
+.tl.folded .strip,.tl.folded .holdrow{display:none}
+.tl.folded .ctl>*:not(#t-prev):not(#t-play):not(#t-next){display:none}
+.tl.folded .ctl{justify-content:center;gap:12px}
+.stagefloat #sf-add{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);box-shadow:0 4px 14px color-mix(in srgb,var(--accent) 45%,transparent)}
+.stagefloat #sf-add:hover{background:var(--accent);filter:brightness(1.08)}
+.onionpop{position:absolute;z-index:7;top:60px;right:12px;width:min(320px,calc(100% - 24px));max-height:calc(100% - 140px);overflow-y:auto;border-radius:18px;box-shadow:0 12px 36px var(--shadow)}
+.onionpop[hidden]{display:none}
+.rngnum{display:flex;align-items:center;gap:10px}
+.rngnum input[type=range]{flex:1;min-width:0}
+.rngnum input[type=number]{width:60px;flex:none;text-align:center;padding:6px 4px}
 </style>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
 <defs>
@@ -512,11 +532,25 @@ body{font-size:14px;letter-spacing:0}
     <button class="btn sm" id="optadv" type="button">Symmetry and smoothing</button>
     <div id="presetbar"><div class="phd"><span>Presets</span><span class="row" style="gap:6px"><button class="btn sm" id="presetedit" type="button" aria-pressed="false">Edit</button><button class="btn sm" id="presetsave" type="button">Save current</button></span></div><div id="presetrow"></div></div>
   </div>
+  <div class="onionpop" id="onionpop" hidden role="dialog" aria-label="Onion skin settings">
+    <div class="panel"><h4>Onion skin <button class="iconbtn" id="onion-close" type="button" aria-label="Close onion skin settings" style="width:30px;height:30px">×</button></h4>
+      <label class="fld">Frames before <span class="rngnum"><input type="range" id="on-b" min="0" max="5" value="2"><input type="number" id="on-b-n" min="0" max="5" step="1" value="2" inputmode="numeric" aria-label="Frames before"></span></label>
+      <label class="fld">Frames after <span class="rngnum"><input type="range" id="on-a" min="0" max="5" value="1"><input type="number" id="on-a-n" min="0" max="5" step="1" value="1" inputmode="numeric" aria-label="Frames after"></span></label>
+      <label class="fld">Strength <input type="range" id="on-o" min="10" max="80" value="40"></label>
+      <label class="fld">Fade per step <input type="range" id="on-fade" min="30" max="95" value="72"><span class="hint" id="on-fade-val">72% remaining per frame</span></label>
+      <label class="row" style="gap:8px;align-items:center"><input type="checkbox" id="on-active-layer"> Active layer only</label>
+      <label class="fld">Previous-frame colour <input type="color" id="on-prev-color" value="#ff4d4d"></label>
+      <label class="fld">Next-frame colour <input type="color" id="on-next-color" value="#35c46a"></label>
+      <div class="row"><button class="btn sm" id="on-save-colors">Save colour pair</button><select id="on-color-presets" aria-label="Saved onion colour pairs" style="min-width:0;flex:1"><option value="">Saved pairs…</option></select></div>
+      <p class="hint">Layer-only mode shows onion skins from the currently selected layer. Colours affect the tinted onion overlays only. Save colour pairs for quick reuse.</p>
+    </div>
+  </div>
   <div class="work">
     <div class="stagewrap" id="stagewrap">
       <div id="stage"><canvas id="view"></canvas><canvas id="fx"></canvas></div>
       <div id="reference-layer" aria-label="Reference images workspace"></div>
       <div class="stagefloat">
+        <button id="sf-add" aria-label="Add frame" title="Add frame"><svg class="i"><use href="#i-plus"/></svg></button>
         <button id="sf-audio" aria-label="Import sound" title="Import sound"><svg class="i"><use href="#i-vol"/></svg></button>
         <button id="sf-img" aria-label="Add background picture" title="Add background picture"><svg class="i"><use href="#i-image"/></svg></button>
         <button id="sf-eye" aria-label="Show or hide onion skin" title="Show or hide onion skin"><svg class="i"><use href="#i-eye"/></svg></button>
@@ -537,17 +571,6 @@ body{font-size:14px;letter-spacing:0}
         <div class="row"><button class="btn sm" id="ly-up"><svg class="i" style="width:16px;height:16px"><use href="#i-up"/></svg>Up</button><button class="btn sm" id="ly-down"><svg class="i" style="width:16px;height:16px"><use href="#i-down"/></svg>Down</button><button class="btn sm" id="ly-merge">Merge down</button><button class="btn sm dan" id="ly-del">Delete</button></div>
         <label class="fld">Layer opacity <input type="range" id="ly-op" min="0" max="100" value="100"></label>
         <label class="fld">Blend mode <select id="ly-blend"><option value="source-over">Normal</option><option value="multiply">Multiply</option><option value="screen">Screen</option><option value="overlay">Overlay</option><option value="darken">Darken</option><option value="lighten">Lighten</option><option value="color-dodge">Color dodge</option><option value="color-burn">Color burn</option><option value="soft-light">Soft light</option><option value="hard-light">Hard light</option><option value="difference">Difference</option><option value="exclusion">Exclusion</option></select></label>
-      </div>
-      <div class="panel"><h4>Onion skin</h4>
-        <label class="fld">Frames before <input type="range" id="on-b" min="0" max="5" value="2"></label>
-        <label class="fld">Frames after <input type="range" id="on-a" min="0" max="5" value="1"></label>
-        <label class="fld">Strength <input type="range" id="on-o" min="10" max="80" value="40"></label>
-        <label class="fld">Fade per step <input type="range" id="on-fade" min="30" max="95" value="72"><span class="hint" id="on-fade-val">72% remaining per frame</span></label>
-        <label class="row" style="gap:8px;align-items:center"><input type="checkbox" id="on-active-layer"> Active layer only</label>
-        <label class="fld">Previous-frame colour <input type="color" id="on-prev-color" value="#ff4d4d"></label>
-        <label class="fld">Next-frame colour <input type="color" id="on-next-color" value="#35c46a"></label>
-        <div class="row"><button class="btn sm" id="on-save-colors">Save colour pair</button><select id="on-color-presets" aria-label="Saved onion colour pairs" style="min-width:0;flex:1"><option value="">Saved pairs…</option></select></div>
-        <p class="hint">Layer-only mode shows onion skins from the currently selected layer. Colours affect the tinted onion overlays only. Save colour pairs for quick reuse.</p>
       </div>
       <div class="panel"><h4>Frame background</h4>
         <div class="row"><button class="btn sm" id="bg-add"><svg class="i" style="width:16px;height:16px"><use href="#i-image"/></svg>Add picture</button><button class="btn sm" id="bg-edit">Move &amp; resize</button><button class="btn sm dan" id="bg-del">Remove</button></div>
@@ -577,6 +600,7 @@ body{font-size:14px;letter-spacing:0}
     </aside>
   </div>
   <div class="tl">
+    <div class="tlgrip" id="tlgrip" role="button" aria-label="Drag to collapse or enlarge the timeline" aria-expanded="true" title="Drag to collapse or enlarge the timeline"></div>
     <div class="ctl">
       <button class="iconbtn" id="t-prev" aria-label="Previous frame"><svg class="i"><use href="#i-prev"/></svg><span class="ctl-label">Prev</span></button>
       <button class="iconbtn big" id="t-play" aria-label="Play"><svg class="i fill"><use href="#i-play"/></svg><span class="ctl-label">Play</span></button>
@@ -884,9 +908,10 @@ function viewMoved(){const v=view();if(!v||!S.rv){applyViewT();return;}const b=S
 function settleView(){clearTimeout(vgT);if(S.vg&&S.view==='editor')renderView();}
 function applyViewT(){view().style.transform='none';const zp=$('#zpct');if(zp)zp.textContent=Math.round(S.zoom*100)+'%';needsRender();}
 /* overlay canvas is screen-sized (device pixels) so selection handles, guides and the brush cursor stay sharp at any zoom */
+let stageLW=0,stageLH=0;
 function sizeFx(){const w=$('#stagewrap'),f=fx();if(!w||!f)return;const r=w.getBoundingClientRect(),d=window.devicePixelRatio||1,W=Math.max(1,Math.round(r.width*d)),H=Math.max(1,Math.round(r.height*d));if(f.width!==W||f.height!==H){f.width=W;f.height=H;}f.style.width=r.width+'px';f.style.height=r.height+'px';f.style.transform='none';}
 function fitView(){const p=S.proj,w=$('#stagewrap');if(!p||!w)return;const r=w.getBoundingClientRect();if(!r.width||!r.height)return;
-  const on=!!fsEl(),sx=r.width/p.w,sy=r.height/p.h;S.zoom=(on?Math.max(sx,sy):Math.min(sx,sy))*(on?.985:.94);S.tx=(r.width-p.w*S.zoom)/2;S.ty=(r.height-p.h*S.zoom)/2;applyViewT();}
+  const on=!!fsEl(),sx=r.width/p.w,sy=r.height/p.h;S.zoom=(on?Math.max(sx,sy):Math.min(sx,sy))*(on?.985:.94);S.tx=(r.width-p.w*S.zoom)/2;S.ty=(r.height-p.h*S.zoom)/2;stageLW=r.width;stageLH=r.height;applyViewT();}
 function sizeCanvases(){const v=view(),r=$('#stagewrap').getBoundingClientRect(),d=window.devicePixelRatio||1;v.width=Math.max(1,Math.round(r.width*d));v.height=Math.max(1,Math.round(r.height*d));v.style.width='100%';v.style.height='100%';v.style.transform='none';v.style.background='transparent';}
 function toCanvasXY(e){const r=$('#stagewrap').getBoundingClientRect();return [(e.clientX-r.left-S.tx)/S.zoom,(e.clientY-r.top-S.ty)/S.zoom];}
 
@@ -1440,7 +1465,7 @@ const RAIL=[
 function syncOptState(){const o=$('#optbar'),r=$('#rail');if(r)r.classList.toggle('optsopen',!!(o&&o.classList.contains('open')));}
 function closeOpts(){const o=$('#optbar');if(o)o.classList.remove('open');syncOptState();}
 function toggleOpts(){const o=$('#optbar');if(!o)return;if(o.classList.contains('open')){o.classList.remove('open');}else if([...o.children].some(c=>!c.hidden)){o.classList.add('open');renderPresets();}syncOptState();}
-function initRailDrag(r){if(r._drag)return;r._drag=1;const wrap=$('#stagewrap'),pos={x:.5,y:1};
+function initRailDrag(r){if(r._drag)return;r._drag=1;const wrap=$('#stagewrap'),pos={x:.5,y:1};r.classList.toggle('collapsed',!!lsGet('fb.railCollapsed',false));
   const apply=()=>{r.style.setProperty('--rfx',pos.x);r.style.setProperty('--rfy',pos.y);};
   const sv=lsGet('fb.railPos',null);if(sv&&isFinite(sv.x)&&isFinite(sv.y)){pos.x=clamp(+sv.x,0,1);pos.y=clamp(+sv.y,0,1);apply();}
   let d=null;
@@ -1452,7 +1477,9 @@ function initRailDrag(r){if(r._drag)return;r._drag=1;const wrap=$('#stagewrap'),
     if(d.tw>0)pos.x=clamp(d.fx+(e.clientX-d.x)/d.tw,0,1);if(d.th>0)pos.y=clamp(d.fy+(e.clientY-d.y)/d.th,0,1);apply();});
   const end=e=>{if(!d||e.pointerId!==d.id)return;d=null;r.classList.remove('dragging');lsSet('fb.railPos',{x:pos.x,y:pos.y});};
   r.addEventListener('pointerup',end);r.addEventListener('pointercancel',end);}
-function buildRail(){const r=$('#rail');r.innerHTML='<span class="rgrip" title="Drag to move the tool bar" aria-label="Drag to move the tool bar"></span>';initRailDrag(r);
+function buildRail(){const r=$('#rail');r.innerHTML='<span class="rgrip" title="Drag to move the tool bar" aria-label="Drag to move the tool bar"></span><button class="rcol" type="button" aria-label="Collapse tool bar" aria-expanded="true"><span class="chev2"></span></button>';initRailDrag(r);
+  {const cb=$('.rcol',r),sync=()=>{const c=r.classList.contains('collapsed');cb.setAttribute('aria-expanded',String(!c));cb.setAttribute('aria-label',c?'Expand tool bar':'Collapse tool bar');cb.title=cb.getAttribute('aria-label');};
+    cb.onclick=()=>{const c=!r.classList.contains('collapsed');if(c)closeOpts();r.classList.toggle('collapsed',c);lsSet('fb.railCollapsed',c);sync();};sync();}
   RAIL.forEach(it=>{if(it==='-'){r.insertAdjacentHTML('beforeend','<div class="gap"></div>');return;}
     const b=document.createElement('button');b.className='it'+(it.opt?' opt':'')+(it.nul||it.t==='color'||it.t==='layers'||it.t==='more'?'':' ul');b.setAttribute('aria-label',it.l);b.title=it.l;
     if(it.t==='pen'){b.dataset.k='pen';b.innerHTML=`<span class="ico">${ic(BR[S.brush].icon)}</span><span class="lb">${BR[S.brush].name}</span>`;b.dataset.cur=S.brush;
@@ -1541,7 +1568,7 @@ function initOptbar(){const bind=(id,fn)=>$(id).addEventListener('input',e=>fn(+
   $('#on-color-presets').onchange=e=>{const p=onionColorPresets()[+e.target.value];if(!p)return;S.onion.prevColor=p.prevColor;S.onion.nextColor=p.nextColor;$('#on-prev-color').value=p.prevColor;$('#on-next-color').value=p.nextColor;saveOnionPrefs();needsRender();};
   $('#on-color-presets').oncontextmenu=e=>{e.preventDefault();const sel=e.currentTarget,i=+sel.value;if(sel.value===''||!Number.isInteger(i))return;const arr=onionColorPresets();arr.splice(i,1);lsSet('fb.onionColorPairs',arr);refreshOnionColorPresets();toast('Saved onion colour pair removed');};
   refreshOnionColorPresets();
-  const syncOnionControls=()=>{[['#on-b','b'],['#on-a','a'],['#on-o','o']].forEach(([id,k])=>{$(id).value=S.onion[k];});$('#on-fade').value=Math.round((S.onion.fade==null?.72:S.onion.fade)*100);$('#on-fade-val').textContent=$('#on-fade').value+'% remaining per frame';$('#on-active-layer').checked=!!S.onion.activeLayerOnly;$('#on-prev-color').value=S.onion.prevColor||'#ff4d4d';$('#on-next-color').value=S.onion.nextColor||'#35c46a';$('#ed-onion').setAttribute('aria-pressed',String(!!S.onion.on));};
+  const syncOnionControls=()=>{[['#on-b','b'],['#on-a','a'],['#on-o','o']].forEach(([id,k])=>{$(id).value=S.onion[k];const nn=$(id+'-n');if(nn)nn.value=S.onion[k];});$('#on-fade').value=Math.round((S.onion.fade==null?.72:S.onion.fade)*100);$('#on-fade-val').textContent=$('#on-fade').value+'% remaining per frame';$('#on-active-layer').checked=!!S.onion.activeLayerOnly;$('#on-prev-color').value=S.onion.prevColor||'#ff4d4d';$('#on-next-color').value=S.onion.nextColor||'#35c46a';$('#ed-onion').setAttribute('aria-pressed',String(!!S.onion.on));};
   syncOnionControls();
   const tg=(id,fn)=>$(id).onclick=e=>{const b=e.currentTarget,on=b.getAttribute('aria-pressed')!=='true';b.setAttribute('aria-pressed',on);fn(on);needsRender();};
   tg('#ed-onion',on=>{S.onion.on=on;saveOnionPrefs();});tg('#ed-grid',on=>S.grid=on);
@@ -2018,6 +2045,41 @@ function syncFs(){const on=!!fsEl(),changed=fsKnown!==on;fsKnown=on;$$('.fsbtn')
 }
 function showSettings(){S.view='settings';$('#home').hidden=true;$('#settings').hidden=false;fillPalGrid($('#palgrid'));$('#st-pen').checked=!!S.penOnly;syncFs();}
 function hideSettings(){S.view='home';$('#settings').hidden=true;$('#home').hidden=false;}
+function initFloatUI(){
+  /* keep the canvas bitmap in step with its box (side panel / timeline open and close) and keep the drawing centred */
+  const sw=$('#stagewrap');
+  if(sw&&window.ResizeObserver){new ResizeObserver(()=>{if(S.view!=='editor'||!S.proj)return;const r=sw.getBoundingClientRect();if(!r.width||!r.height)return;
+    if(stageLW&&stageLH&&(Math.abs(r.width-stageLW)>.5||Math.abs(r.height-stageLH)>.5)){S.tx+=(r.width-stageLW)/2;S.ty+=(r.height-stageLH)/2;}
+    stageLW=r.width;stageLH=r.height;sizeCanvases();renderView();}).observe(sw);}
+  /* timeline: drag the grip down to collapse, up to enlarge */
+  const tl=$('.tl'),grip=$('#tlgrip');
+  if(tl&&grip){const MIN=92,MAX=220;let fw=lsGet('fb.tlSize',MIN);fw=(+fw===0)?0:clamp(+fw||MIN,MIN,MAX);
+    const apply=()=>{tl.classList.toggle('folded',fw===0);tl.style.setProperty('--frw',(fw||MIN)+'px');grip.setAttribute('aria-expanded',String(fw>0));};apply();
+    let d=null;
+    grip.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'&&e.button!==0)return;e.preventDefault();d={id:e.pointerId,y:e.clientY,s:fw||40,was:fw,moved:false};try{grip.setPointerCapture(e.pointerId);}catch(_){}});
+    grip.addEventListener('pointermove',e=>{if(!d||e.pointerId!==d.id)return;const dy=d.y-e.clientY;if(Math.abs(dy)>4)d.moved=true;if(!d.moved)return;const c=d.s+dy*1.5;fw=c<64?0:clamp(c,MIN,MAX);apply();});
+    grip.addEventListener('pointerup',e=>{if(!d||e.pointerId!==d.id)return;if(!d.moved)fw=d.was?0:MIN;lsSet('fb.tlSize',fw);d=null;apply();});
+    grip.addEventListener('pointercancel',e=>{if(!d||e.pointerId!==d.id)return;fw=d.was;d=null;apply();});}
+  /* add-frame button on the canvas */
+  const sa=$('#sf-add');if(sa)sa.onclick=()=>$('#t-add').click();
+  /* onion skin card: long-press (or right-click) the onion icon */
+  const pop=$('#onionpop'),ob=$('#ed-onion');
+  if(pop&&ob){const show=on=>{pop.hidden=!on;};
+    $('#onion-close').onclick=()=>show(false);
+    const orig=ob.onclick;let tm=0,fired=false;
+    ob.onclick=function(e){if(fired){fired=false;return;}return orig?orig.call(this,e):undefined;};
+    const clr=()=>{clearTimeout(tm);tm=0;};
+    ob.addEventListener('pointerdown',()=>{fired=false;clr();tm=setTimeout(()=>{tm=0;fired=true;show(pop.hidden);},450);});
+    ['pointerup','pointerleave','pointercancel'].forEach(t=>ob.addEventListener(t,clr));
+    ob.addEventListener('contextmenu',e=>{e.preventDefault();if(!fired)show(pop.hidden);});
+    document.addEventListener('pointerdown',e=>{if(!pop.hidden&&!pop.contains(e.target)&&!ob.contains(e.target))show(false);});
+    document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!pop.hidden)show(false);});}
+  /* editable frame counts beside the onion sliders */
+  [['#on-b','#on-b-n'],['#on-a','#on-a-n']].forEach(([r,n])=>{const R=$(r),N=$(n);if(!R||!N)return;N.value=R.value;
+    R.addEventListener('input',()=>{N.value=R.value;});
+    N.addEventListener('input',()=>{if(N.value==='')return;const v=clamp(Math.round(+N.value),+R.min,+R.max);if(!isFinite(v))return;if(String(v)!==N.value)N.value=v;R.value=v;R.dispatchEvent(new Event('input',{bubbles:true}));});
+    N.addEventListener('change',()=>{N.value=R.value;});});
+}
 function initExtras(){$$('.fsbtn').forEach(b=>b.onclick=toggleFullscreen);document.addEventListener('fullscreenchange',syncFs);document.addEventListener('webkitfullscreenchange',syncFs);window.addEventListener('resize',()=>{if(S.view==='editor'&&S.proj){sizeCanvases();if(fsEl())fitView();needsRender();}});window.addEventListener('orientationchange',()=>{if(S.view==='editor'&&S.proj)setTimeout(()=>{sizeCanvases();if(fsEl())fitView();needsRender();},180);});
   $('#hm-settings').onclick=showSettings;$('#st-back').onclick=hideSettings;$('#st-pen').onchange=e=>{S.penOnly=e.target.checked;lsSet('fb.penonly',S.penOnly);};
   const eye=$('#sf-eye'),syncEye=()=>{const on=$('#ed-onion').getAttribute('aria-pressed')==='true';$('use',eye).setAttribute('href',on?'#i-eye':'#i-eyeoff');};
@@ -2031,7 +2093,7 @@ function openProject(p,isNew){p.audioTracks=(p.audioTracks&&p.audioTracks.length
 async function goHome(){stopPlay();commitFloat();clearTimeout(saveT);await saveNow();lsSet('fb.lastSession',null);S.view='home';S.proj=null;stopAudio();$('#editor').hidden=true;$('#home').hidden=false;await renderHome();}
 async function offerSessionRecovery(){const id=lsGet('fb.lastSession',null);if(!id)return;let d=null;try{d=await dbGet('projects',id);}catch(e){return;}if(!d){lsSet('fb.lastSession',null);return;}const m=modal(`<h3>Resume your last session?</h3><p class="hint">Flipbook Studio found your last open project, <b>${esc(d.name||'Untitled animation')}</b>. Its most recently autosaved version is available on this device.</p><div class="row sp"><button class="btn" id="recovery-dismiss">Stay on home</button><button class="btn pri" id="recovery-open">Resume project</button></div>`);$('#recovery-dismiss',m.el).onclick=()=>{lsSet('fb.lastSession',null);m.close();};$('#recovery-open',m.el).onclick=()=>{m.close();openById(id);};}
 async function boot(){initPalette();S.penOnly=lsGet('fb.penonly',false);const onionPrefs=lsGet('fb.onionPrefs',null);if(onionPrefs)Object.keys(S.onion).forEach(k=>{if(Object.prototype.hasOwnProperty.call(onionPrefs,k))S.onion[k]=onionPrefs[k];});
-  S.brush='pencil';S.tool='brush';S.size=brushSize.pencil;initStage();initOptbar();initScrub();initLayers();initTransport();initAudio();initBg();initReferences();initRoto();initExtras();
+  S.brush='pencil';S.tool='brush';S.size=brushSize.pencil;initStage();initOptbar();initScrub();initLayers();initTransport();initAudio();initBg();initReferences();initRoto();initExtras();initFloatUI();
   $('#ed-back').onclick=goHome;$('#ed-export').onclick=openExport;$('#ed-settings').onclick=settingsDialog;$('#ed-name').onclick=settingsDialog;$('#ed-tools-menu').onclick=e=>{const actions=[['Grid on/off','ed-grid'],['Fullscreen','ed-full'],['Settings','ed-settings'],['Auto in-betweens','t-tween'],['Playback & export range','t-range'],['Compare frames','t-compare'],['Multi-frame editing','t-multi'],['Animation plan','t-plan'],['Perspective guides','t-perspective'],['Motion path guide','t-motion'],['Import image sequence','t-seq']];const menu=document.createElement('div');menu.className='menu';menu.id='toolsMenu';actions.forEach(([label,id])=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=()=>{pop.close();$('#'+id).click();};menu.appendChild(b);});const pop=popover(e.currentTarget,menu);};
   $('#hm-new').onclick=newDialog;$('#hm-import').onclick=()=>$('#fileProject').click();$('#fileProject').onchange=e=>{const f=e.target.files[0];e.target.value='';if(f)importBackup(f);};
   await renderHome();checkStorageHealth();await offerSessionRecovery();
