@@ -361,6 +361,22 @@ body{font-size:14px;letter-spacing:0}
 .stagebtns .chev{display:block;width:9px;height:9px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg) translate(-2px,-2px);transition:transform .15s}
 .stagebtns.collapsed .chev{transform:rotate(225deg) translate(-2px,-2px)}
 .stagebtns.collapsed>*:not(#zcollapse){display:none}
+/* Floating tool bar on the canvas: drag it by the grip on its left */
+.rail{position:absolute;z-index:4;flex:none;flex-direction:row;align-items:center;margin:0;width:max-content;max-width:calc(100% - 24px);max-height:none;overflow-x:auto;overflow-y:hidden;--rfx:.5;--rfy:1;left:calc(12px + var(--rfx)*(100% - 24px));top:calc(12px + var(--rfy)*(100% - 24px));transform:translate(calc(var(--rfx)*-100%),calc(var(--rfy)*-100%))}
+.rail .gap{width:1px;height:32px;margin:0 6px}
+.rail.dragging{box-shadow:0 12px 32px var(--shadow);opacity:.92}
+.rgrip{flex:none;align-self:stretch;width:22px;min-height:44px;display:grid;place-items:center;cursor:grab;touch-action:none;user-select:none;color:var(--mut);border-radius:14px}
+.rgrip::before{content:"";width:12px;height:24px;background:radial-gradient(circle,currentColor 1.4px,transparent 1.9px) 0 0/6px 8px}
+.rgrip:hover{background:var(--surface2)}
+.rail.dragging .rgrip{cursor:grabbing}
+@media (max-width:860px){.stagefloat,.stagebtns{bottom:96px}}
+@media (max-width:700px) and (orientation:portrait){.optbar{top:60px;bottom:auto}}
+@media (orientation:landscape) and (max-height:560px){
+  .stagefloat,.stagebtns{bottom:80px}
+  .stagefloat{left:12px}
+  .optbar{left:12px;top:52px}
+  .work,.work.noside,.work.focus{padding-left:0}
+}
 </style>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
 <defs>
@@ -513,6 +529,7 @@ body{font-size:14px;letter-spacing:0}
         <button class="iconbtn" id="zfit" aria-label="Fit to screen"><svg class="i"><use href="#i-fit"/></svg></button>
         <button class="iconbtn" id="zhand" aria-label="Hand tool: drag to move the canvas" aria-pressed="false"><svg class="i"><use href="#i-hand2"/></svg></button>
       </div>
+      <div class="rail" id="rail" role="toolbar" aria-label="Tools"></div>
     </div>
     <aside class="side" id="side" aria-label="Layers, onion skin, background, audio">
       <div class="panel"><h4>Layers <span class="row"><button class="iconbtn" id="ly-add" aria-label="Add layer" style="width:30px;height:30px"><svg class="i"><use href="#i-plus"/></svg></button></span></h4>
@@ -575,7 +592,6 @@ body{font-size:14px;letter-spacing:0}
     <div class="strip" id="strip"></div>
     <div class="holdrow" id="holdrow"><span class="holdlb">Hold</span><input type="range" id="holdsl" min="1" max="12" step="1" value="1" aria-label="How many frames this drawing is held"><output id="holdval" class="holdchip">1 frame</output></div>
   </div>
-  <div class="rail" id="rail" role="toolbar" aria-label="Tools"></div>
 </div>
 <div id="timelineExtraActions" hidden aria-hidden="true">
   <button id="t-tween" aria-label="Auto in-betweens">Auto in-betweens</button>
@@ -611,7 +627,7 @@ function modal(html,cls=''){const s=document.createElement('div');s.className='s
 function popover(anchor,node){const s=document.createElement('div');s.className='scrim pop';const b=document.createElement('div');b.className='popbox';b.appendChild(node);s.appendChild(b);document.body.appendChild(s);
   const r=anchor.getBoundingClientRect();const bw=b.offsetWidth,bh=b.offsetHeight;
   const railEl=anchor.closest&&anchor.closest('#rail'),inRail=!!railEl,rowRail=inRail&&getComputedStyle(railEl).flexDirection==='row';
-  b.style.left=clamp(inRail&&!rowRail?r.right+8:r.left,8,innerWidth-bw-8)+'px';b.style.top=clamp(rowRail?r.top-bh-8:inRail?r.top:r.bottom+6,8,Math.max(8,innerHeight-bh-8))+'px';
+  b.style.left=clamp(inRail&&!rowRail?r.right+8:r.left,8,innerWidth-bw-8)+'px';b.style.top=clamp(rowRail?(r.top-bh-8>=8?r.top-bh-8:r.bottom+8):inRail?r.top:r.bottom+6,8,Math.max(8,innerHeight-bh-8))+'px';
   const close=()=>s.remove();s.addEventListener('pointerdown',e=>{if(e.target===s)close();});return {close,box:b};}
 const G={guide:null,lessons:[]};      // lesson hooks filled in later
 
@@ -1404,7 +1420,7 @@ function initStage(){const st=$('#stage');
   st.addEventListener('wheel',e=>{e.preventDefault();const r=stageRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
     if(e.ctrlKey||e.metaKey||Math.abs(e.deltaY)>0&&!e.shiftKey){const k=Math.exp(-e.deltaY*(e.ctrlKey?.01:.0015)),z=clamp(S.zoom*k,.1,16),cx=(mx-S.tx)/S.zoom,cy=(my-S.ty)/S.zoom;S.zoom=z;S.tx=mx-cx*z;S.ty=my-cy*z;}
     else{S.tx-=e.deltaX;S.ty-=e.deltaY;}viewMoved();},{passive:false});
-  $('#stagewrap').addEventListener('pointerdown',closeOpts,true);const zb=$('#stagebtns'),setZC=c=>{zb.classList.toggle('collapsed',c);$('#zcollapse').setAttribute('aria-expanded',String(!c));$('#zcollapse').setAttribute('aria-label',c?'Expand zoom controls':'Collapse zoom controls');lsSet('fb.zoomCollapsed',c);};setZC(!!lsGet('fb.zoomCollapsed',false));$('#zcollapse').onclick=()=>setZC(!zb.classList.contains('collapsed'));
+  $('#stagewrap').addEventListener('pointerdown',e=>{if(e.target.closest&&e.target.closest('#rail'))return;closeOpts();},true);const zb=$('#stagebtns'),setZC=c=>{zb.classList.toggle('collapsed',c);$('#zcollapse').setAttribute('aria-expanded',String(!c));$('#zcollapse').setAttribute('aria-label',c?'Expand zoom controls':'Collapse zoom controls');lsSet('fb.zoomCollapsed',c);};setZC(!!lsGet('fb.zoomCollapsed',false));$('#zcollapse').onclick=()=>setZC(!zb.classList.contains('collapsed'));
   $('#zout').onclick=()=>zoomBy(1/1.25);$('#zhand').onclick=()=>{S.hand=!S.hand;$('#zhand').setAttribute('aria-pressed',String(S.hand));$('#zhand').classList.toggle('on',S.hand);$('#stagewrap').style.cursor=S.hand?'grab':'';};$('#zin').onclick=()=>zoomBy(1.25);$('#zfit').onclick=()=>{fitView();needsRender();};
   window.addEventListener('resize',()=>{if(S.view==='editor'){sizeCanvases();fitView();needsRender();}});
   document.addEventListener('keydown',e=>{if(S.view!=='editor')return;const t=e.target.tagName;if(t==='INPUT'||t==='SELECT'||t==='TEXTAREA')return;const k=e.key.toLowerCase();
@@ -1424,7 +1440,19 @@ const RAIL=[
 function syncOptState(){const o=$('#optbar'),r=$('#rail');if(r)r.classList.toggle('optsopen',!!(o&&o.classList.contains('open')));}
 function closeOpts(){const o=$('#optbar');if(o)o.classList.remove('open');syncOptState();}
 function toggleOpts(){const o=$('#optbar');if(!o)return;if(o.classList.contains('open')){o.classList.remove('open');}else if([...o.children].some(c=>!c.hidden)){o.classList.add('open');renderPresets();}syncOptState();}
-function buildRail(){const r=$('#rail');r.innerHTML='';
+function initRailDrag(r){if(r._drag)return;r._drag=1;const wrap=$('#stagewrap'),pos={x:.5,y:1};
+  const apply=()=>{r.style.setProperty('--rfx',pos.x);r.style.setProperty('--rfy',pos.y);};
+  const sv=lsGet('fb.railPos',null);if(sv&&isFinite(sv.x)&&isFinite(sv.y)){pos.x=clamp(+sv.x,0,1);pos.y=clamp(+sv.y,0,1);apply();}
+  let d=null;
+  r.addEventListener('pointerdown',e=>{const g=e.target.closest&&e.target.closest('.rgrip');if(!g||(e.pointerType==='mouse'&&e.button!==0))return;
+    e.preventDefault();const R=r.getBoundingClientRect(),W=wrap.getBoundingClientRect();
+    d={id:e.pointerId,x:e.clientX,y:e.clientY,fx:pos.x,fy:pos.y,tw:W.width-24-R.width,th:W.height-24-R.height};
+    try{g.setPointerCapture(e.pointerId);}catch(_){}r.classList.add('dragging');});
+  r.addEventListener('pointermove',e=>{if(!d||e.pointerId!==d.id)return;
+    if(d.tw>0)pos.x=clamp(d.fx+(e.clientX-d.x)/d.tw,0,1);if(d.th>0)pos.y=clamp(d.fy+(e.clientY-d.y)/d.th,0,1);apply();});
+  const end=e=>{if(!d||e.pointerId!==d.id)return;d=null;r.classList.remove('dragging');lsSet('fb.railPos',{x:pos.x,y:pos.y});};
+  r.addEventListener('pointerup',end);r.addEventListener('pointercancel',end);}
+function buildRail(){const r=$('#rail');r.innerHTML='<span class="rgrip" title="Drag to move the tool bar" aria-label="Drag to move the tool bar"></span>';initRailDrag(r);
   RAIL.forEach(it=>{if(it==='-'){r.insertAdjacentHTML('beforeend','<div class="gap"></div>');return;}
     const b=document.createElement('button');b.className='it'+(it.opt?' opt':'')+(it.nul||it.t==='color'||it.t==='layers'||it.t==='more'?'':' ul');b.setAttribute('aria-label',it.l);b.title=it.l;
     if(it.t==='pen'){b.dataset.k='pen';b.innerHTML=`<span class="ico">${ic(BR[S.brush].icon)}</span><span class="lb">${BR[S.brush].name}</span>`;b.dataset.cur=S.brush;
@@ -1523,7 +1551,7 @@ function initOptbar(){const bind=(id,fn)=>$(id).addEventListener('input',e=>fn(+
   $('#on-prev-color').addEventListener('input',e=>{S.onion.prevColor=e.target.value;saveOnionPrefs();needsRender();});
   $('#on-next-color').addEventListener('input',e=>{S.onion.nextColor=e.target.value;saveOnionPrefs();needsRender();});
   $('#ed-side').onclick=()=>$('#side').classList.toggle('open');
-  $('#stagewrap').addEventListener('pointerdown',()=>$('#side').classList.remove('open'));}
+  $('#stagewrap').addEventListener('pointerdown',e=>{if(e.target.closest&&e.target.closest('#rail'))return;$('#side').classList.remove('open');});}
 
 /* ===== frames, strip, thumbnails ===== */
 const THW=160;let thumbQ=new Set(),thumbT=0,selectedFrames=new Set(),motionPathMode=false;
