@@ -1,4 +1,16 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel=manifest href=manifest.webmanifest><meta name=theme-color content="#0e1017"><link rel=apple-touch-icon href=apple-touch-icon.png><meta name=mobile-web-app-capable content=yes><meta name=apple-mobile-web-app-capable content=yes><meta name=apple-mobile-web-app-title content="Flipbook"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><link rel=manifest href=manifest.webmanifest><meta name=theme-color content="#0e1017"><link rel=apple-touch-icon href=apple-touch-icon.png><meta name=mobile-web-app-capable content=yes><meta name=apple-mobile-web-app-capable content=yes><meta name=apple-mobile-web-app-title content="Flipbook"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}/* Compact tool rail */
+.rail{padding:4px 6px!important;gap:2px!important;border-radius:18px!important}
+.rail .rgrip{width:16px!important;min-height:36px!important}
+.rail .it{min-width:42px!important;padding:1px 2px!important;gap:1px!important}
+.rail .it .ico{width:38px!important;height:38px!important;min-width:0!important;min-height:0!important;border-radius:11px!important}
+.rail .it .ico svg.i,.rail .rt svg.i{width:20px;height:20px}
+.rail .rt{min-width:40px!important;min-height:42px!important;padding:2px!important;gap:1px!important;border-radius:11px!important}
+.rail .gap{height:24px!important;margin:0 3px!important}
+.rail .rcol{width:24px!important;min-height:36px!important}
+.rail .it .lb,.rail .rt .ctl-label{font-size:9px!important}
+@media (max-width:860px),(pointer:coarse){.rail .it .lb,.rail .rt .ctl-label{display:none!important}.rail .rt,.rail .it{min-width:38px!important}.rail .rt{min-height:38px!important}}
+#selbar[hidden]{display:none!important}
+</style></head><body>
 <title>Flipbook Studio</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Roboto:wght@400;500;700&display=swap">
 <style>
@@ -571,6 +583,8 @@ body{font-size:14px;letter-spacing:0}
       <label class="fld">Previous-frame colour <input type="color" id="on-prev-color" value="#ff4d4d"></label>
       <label class="fld">Next-frame colour <input type="color" id="on-next-color" value="#35c46a"></label>
       <div class="row"><button class="btn sm" id="on-save-colors">Save colour pair</button><select id="on-color-presets" aria-label="Saved onion colour pairs" style="min-width:0;flex:1"><option value="">Saved pairs…</option></select></div>
+      <label class="row" style="gap:8px;align-items:center"><input type="checkbox" id="on-selfcheck" checked> Self-check ghosts (auto-repair)</label>
+      <div class="row"><button class="btn sm" id="on-copylog" type="button">Copy bug log</button></div>
       <p class="hint">Layer-only mode shows onion skins from the currently selected layer. Colours affect the tinted onion overlays only. Save colour pairs for quick reuse.</p>
     </div>
   </div>
@@ -691,7 +705,7 @@ const S={proj:null,fi:0,li:0,tool:'pencil',brush:'pencil',color:'#1d2230',size:6
   dirtyCels:new Set(),dirtyDoc:false,stroke:null,sel:null,view:'home'};
 let saveHook=()=>{};
 function markCel(f,l){invalidateLayerCache(f,l.id);S.dirtyCels.add(f.id+'|'+l.id);saveHook();}
-function markDoc(){S.dirtyDoc=true;onionCache=null;tintedFrameCache.clear();saveHook();}
+function markDoc(){S.dirtyDoc=true;cacheGen++;onionCache=null;tintedFrameCache.clear();saveHook();}
 const P=()=>S.proj, F=()=>S.proj.frames[S.fi], L=()=>S.proj.layers[S.li];
 
 /* ===== project model ===== */
@@ -706,6 +720,13 @@ function cloneVectors(v){try{return JSON.parse(JSON.stringify(v||{}));}catch(e){
 function vectorList(f,l,create=false){if(!f.vectors)f.vectors={};if(!f.vectors[l.id]&&create)f.vectors[l.id]=[];return f.vectors[l.id]||[];}
 // Cached, project-resolution layer composites avoid replaying every stored vector stroke on every display frame.
 const layerBitmapCache=new Map();
+/* Cache safety: identity tokens + a generation counter bumped on every edit, so a cached bitmap can never be reused
+   for different content that merely has the same stroke count. */
+const _tokMap=new WeakMap();let _tokN=0,cacheGen=0;
+function tok(o){if(!o)return 0;let t=_tokMap.get(o);if(!t){t=++_tokN;_tokMap.set(o,t);}return t;}
+/* Bug log: ring buffer of recent events so an odd ghost can be traced to the steps that led to it. */
+const DBG={log:[],verify:true,t:0,lastSig:''};
+function dbg(ev,data){try{const p=S&&S.proj;DBG.log.push((new Date().toISOString().slice(11,23))+' '+ev+(data?' '+data:'')+(p?' [fi='+S.fi+'/'+p.frames.length+' li='+S.li+']':''));if(DBG.log.length>150)DBG.log.shift();}catch(e){}}
 // Editor-only, viewport-resolution vector composites keep saved strokes sharp while zooming.
 // This cache is separate from project-resolution bitmaps used by exports and thumbnails.
 const highResLayerCache=new Map();
@@ -715,14 +736,14 @@ let hiTintScratchC=null;
 // Keep colourized project-resolution snapshots and invalidate them on any layer edit.
 const tintedFrameCache=new Map();
 function layerCacheKey(fid,lid){return fid+'|'+lid;}
-function invalidateLayerCache(f,lid){onionCache=null;if(f)layerBitmapCache.delete(layerCacheKey(f.id,lid));highResLayerCache.clear();tintedFrameCache.clear();}
+function invalidateLayerCache(f,lid){cacheGen++;onionCache=null;if(f)layerBitmapCache.delete(layerCacheKey(f.id,lid));highResLayerCache.clear();tintedFrameCache.clear();}
 function setVectorList(f,lid,ops){invalidateLayerCache(f,lid);if(!f.vectors)f.vectors={};if(ops&&ops.length)f.vectors[lid]=ops;else delete f.vectors[lid];}
 function resolveLinkedFrame(f,lid){let cur=f,seen=new Set();while(cur&&cur.links&&cur.links[lid]&&!seen.has(cur.id)){seen.add(cur.id);const next=S.proj.frames.find(x=>x.id===cur.links[lid]);if(!next)break;cur=next;}return cur||f;}
 function detachLinkedLayer(fi,li){const p=S.proj,f=p&&p.frames[fi],l=p&&p.layers[li];if(!f||!l||!f.links||!f.links[l.id])return false;const src=resolveLinkedFrame(f,l.id),c=src.cels[l.id];if(c)f.cels[l.id]=snapCel(c);else delete f.cels[l.id];const ops=vectorList(src,l,false);if(ops.length){if(!f.vectors)f.vectors={};f.vectors[l.id]=cloneVectors(ops);}else if(f.vectors)delete f.vectors[l.id];delete f.links[l.id];invalidateLayerCache(f,l.id);if(f.cels[l.id])S.dirtyCels.add(f.id+'|'+l.id);markDoc();return true;}
 function getLayerBitmap(f,l){const p=S.proj,key=layerCacheKey(f.id,l.id),cel=f.cels[l.id]||null,ops=vectorList(f,l,false),old=layerBitmapCache.get(key);
-  if(old&&old.cel===cel&&old.ops===ops&&old.opsLength===ops.length&&old.w===p.w&&old.h===p.h)return old.canvas;
+  if(old&&old.cel===cel&&old.ops===ops&&old.opsLength===ops.length&&old.gen===cacheGen&&old.w===p.w&&old.h===p.h)return old.canvas;
   const c=mk(p.w,p.h),x=c.getContext('2d',{alpha:true,desynchronized:true});if(cel)x.drawImage(cel,0,0);for(const op of ops)renderVectorOp(x,op,p);
-  layerBitmapCache.set(key,{cel,ops,opsLength:ops.length,w:p.w,h:p.h,canvas:c});return c;
+  layerBitmapCache.set(key,{cel,ops,opsLength:ops.length,gen:cacheGen,w:p.w,h:p.h,canvas:c});return c;
 }
 function getCel(f,l,create){let c=f.cels[l.id];if(!c&&create){c=mk(S.proj.w,S.proj.h);f.cels[l.id]=c;}return c;}
 function celById(fid,lid,create){const f=S.proj.frames.find(x=>x.id===fid),l=S.proj.layers.find(x=>x.id===lid);if(!f||!l)return null;return getCel(f,l,create);}
@@ -749,13 +770,14 @@ function hiResScaleBucket(scale){
   return Math.pow(1.18,Math.ceil(Math.log(safe)/step-1e-9));
 }
 function hiResLayerCacheKey(fid,lid,w,h,pw,ph,bucket,cel,ops){
-  return [fid,lid,w,h,pw,ph,Math.round(bucket*10000)/10000,cel?1:0,ops.length].join('|');
+  return [fid,lid,w,h,pw,ph,Math.round(bucket*10000)/10000,tok(cel),tok(ops),ops.length,ops.length?tok(ops[ops.length-1]):0,cacheGen].join('|');
 }
 function cacheHiResLayer(key,entry){
   highResLayerCache.delete(key);highResLayerCache.set(key,entry);
   // Bound retained backing stores for mobile devices.
   let bytes=0;for(const e of highResLayerCache.values())bytes+=e.canvas.width*e.canvas.height*4;
-  while(highResLayerCache.size>24||bytes>160*1024*1024){
+  const maxN=Math.max(24,((S.onion?S.onion.b+S.onion.a:0)+1)*Math.max(1,S.proj?S.proj.layers.length:1)*2+4);
+  while(highResLayerCache.size>maxN||bytes>160*1024*1024){
     const first=highResLayerCache.keys().next().value,e=highResLayerCache.get(first);
     if(!e)break;bytes-=e.canvas.width*e.canvas.height*4;highResLayerCache.delete(first);
   }
@@ -769,10 +791,10 @@ function hiResLayerBitmap(src,l,ops,ctx,xf){
   const bw=Math.ceil(p.w*bucket),bh=Math.ceil(p.h*bucket);
   const canFull=bw>0&&bh>0&&bw<=8192&&bh<=8192&&bw*bh*4<=32*1024*1024;
   if(canFull){
-    const key=hiResLayerCacheKey(src.id,l.id,W,H,p.w,p.h,bucket,cel,ops),sig=[src.id,l.id,W,H,p.w,p.h,cel?1:0,ops.length].join('|');
+    const key=hiResLayerCacheKey(src.id,l.id,W,H,p.w,p.h,bucket,cel,ops),sig=[src.id,l.id,W,H,p.w,p.h,tok(cel),tok(ops),ops.length,cacheGen].join('|');
     let entry=highResLayerCache.get(key);
     if(entry){highResLayerCache.delete(key);highResLayerCache.set(key,entry);return entry;}
-    const s0=[src.id,l.id,p.w,p.h,bucket,cel?1:0].join('|');
+    const s0=[src.id,l.id,p.w,p.h,bucket,tok(cel),tok(ops),cacheGen].join('|');
     {// Append-only fast path: draw just the newly added strokes onto the cached bitmap instead of replaying every stroke.
       let cand=null;for(const e of highResLayerCache.values()){if(e.full&&e.s0===s0&&e.n&&e.n<ops.length&&ops[0]===e.first&&ops[e.n-1]===e.last&&(!cand||e.n>cand.n))cand=e;}
       if(cand){const bc=cand.canvas.getContext('2d');bc.setTransform(bucket,0,0,bucket,0,0);for(let i=cand.n;i<ops.length;i++)renderVectorOp(bc,ops[i],p);bc.setTransform(1,0,0,1,0,0);
@@ -797,7 +819,7 @@ function hiResLayerBitmap(src,l,ops,ctx,xf){
   // entry can never allocate an enormous backing store. This path remains sharp
   // at the current transform and retains the existing bounded LRU behavior.
   const n=v=>Math.round(v*100000)/100000;
-  const key=['view',src.id,l.id,W,H,n(xf.a),n(xf.b),n(xf.c),n(xf.d),n(xf.e),n(xf.f)].join('|');
+  const key=['view',src.id,l.id,tok(cel),tok(ops),ops.length,cacheGen,W,H,n(xf.a),n(xf.b),n(xf.c),n(xf.d),n(xf.e),n(xf.f)].join('|');
   let entry=highResLayerCache.get(key);
   if(entry){highResLayerCache.delete(key);highResLayerCache.set(key,entry);return entry;}
   const bitmap=mk(W,H),bc=bitmap.getContext('2d',{alpha:true,desynchronized:true});
@@ -926,8 +948,29 @@ function needsRender(){if(rq)return;rq=true;const go=()=>{
   rq=false;if(S.view==='editor')renderView();};requestAnimationFrame(go);}
 function renderView(){const p=S.proj;if(!p)return;if(S.vg){S.vg=false;clearTimeout(vgT);}const t0=performance.now();const v=view(),ctx=v.getContext('2d',{alpha:true,desynchronized:true}),d=window.devicePixelRatio||1;v.style.transform='none';S.rv={z:S.zoom,tx:S.tx,ty:S.ty};{const fe=fx();if(fe)fe.style.opacity='';}
   ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,v.width,v.height);ctx.setTransform(d*S.zoom,0,0,d*S.zoom,d*S.tx,d*S.ty);
-  composite(ctx,S.playing?S.playFi:S.fi,{onion:!S.playing,grid:!S.playing,guides:!S.playing,live:S.playing?null:S.stroke,hiResVectors:true});
-  if(typeof drawFx==='function')drawFx();S.rt=performance.now()-t0;lastRT=performance.now();}
+  try{composite(ctx,S.playing?S.playFi:S.fi,{onion:!S.playing,grid:!S.playing,guides:!S.playing,live:S.playing?null:S.stroke,hiResVectors:true});}
+  catch(err){/* a throw here used to leave a half-drawn canvas with no trace; now: log, reset the context, rebuild from scratch */
+    dbg('RENDER-ERROR',String(err&&err.message||err));console.error('render failed',err);
+    try{ctx.reset&&ctx.reset();}catch(e){}onionCache=null;cacheGen++;tintedFrameCache.clear();highResLayerCache.clear();layerBitmapCache.clear();
+    if(!DBG.retry){DBG.retry=1;setTimeout(()=>{DBG.retry=0;needsRender();},60);}}
+  if(typeof drawFx==='function')drawFx();S.rt=performance.now()-t0;lastRT=performance.now();
+  if(!S.playing&&!S.stroke){const n=S.onion,sig=S.fi+'/'+p.frames.length+' b'+n.b+' a'+n.a+(n.on?'':' OFF')+(n.activeLayerOnly?' layerOnly':'');if(sig!==DBG.lastSig){DBG.lastSig=sig;dbg('render',sig+' ids='+p.frames.slice(Math.max(0,S.fi-n.b),S.fi+n.a+1).map(q=>q.id.toString().slice(-4)).join(','));}}
+  if(DBG.verify&&!S.playing&&!S.stroke){clearTimeout(DBG.t);DBG.t=setTimeout(verifyView,550);}}
+/* Self-check: re-render the current view with every cache emptied and compare to what is on screen.
+   If they differ, a cache served stale pixels (the "that isn't supposed to happen" ghost). Log it and repair. */
+function verifyView(){try{
+  if(!DBG.verify||S.view!=='editor'||S.playing||S.stroke||S.sel||!S.proj||!S.onion.on)return;
+  const v=view();if(!v||!v.width)return;const W=v.width,H=v.height,d=window.devicePixelRatio||1,sw=Math.min(240,W),sh=Math.max(1,Math.round(H*sw/W));
+  const grab=src=>{const c=mk(sw,sh),x=c.getContext('2d',{willReadFrequently:true});x.drawImage(src,0,0,sw,sh);return x.getImageData(0,0,sw,sh).data;};
+  const A=grab(v),fi=S.fi,gen0=cacheGen;
+  onionCache=null;tintedFrameCache.clear();highResLayerCache.clear();layerBitmapCache.clear();
+  const f=mk(W,H),fc=f.getContext('2d',{alpha:true});fc.setTransform(d*S.zoom,0,0,d*S.zoom,d*S.tx,d*S.ty);
+  composite(fc,fi,{onion:true,grid:true,guides:true,live:null,hiResVectors:true});
+  if(fi!==S.fi||gen0!==cacheGen)return;
+  const B=grab(f);let bad=0;for(let i=0;i<A.length;i+=4){if(Math.abs(A[i]-B[i])>28||Math.abs(A[i+1]-B[i+1])>28||Math.abs(A[i+2]-B[i+2])>28||Math.abs(A[i+3]-B[i+3])>28)bad++;}
+  const frac=bad/(A.length/4);
+  if(frac>0.003){dbg('STALE-CACHE-DETECTED','differing='+(frac*100).toFixed(2)+'%');toast('Stale ghost detected and repaired \u2014 copy bug log from onion settings');needsRender();}
+}catch(e){dbg('verify-error',String(e&&e.message||e));}}
 /* Zoom/pan engine: while a gesture is moving, GPU-transform the last rendered frame (no re-render, no lag);
    re-rasterise once, sharply, when the gesture settles. */
 function viewMoved(){const v=view();if(!v||!S.rv){applyViewT();return;}const b=S.rv,k=S.zoom/b.z;
@@ -949,8 +992,8 @@ function toCanvasXY(e){const r=$('#stagewrap').getBoundingClientRect();return [(
 
 /* ===== history ===== */
 function pushH(e){S.undo.push(e);if(S.undo.length>60)S.undo.shift();S.redo.length=0;refreshHist();}
-function undo(){if(S.playing)return;if(S.sel){commitFloat(true);needsRender();return;}const e=S.undo.pop();if(!e)return;e.u();S.redo.push(e);afterChange(true);}
-function redo(){if(S.playing||S.sel)return;const e=S.redo.pop();if(!e)return;e.r();S.undo.push(e);afterChange(true);}
+function undo(){dbg('undo');if(S.playing)return;if(S.sel){commitFloat(true);needsRender();return;}const e=S.undo.pop();if(!e)return;e.u();S.redo.push(e);afterChange(true);}
+function redo(){dbg('redo');if(S.playing||S.sel)return;const e=S.redo.pop();if(!e)return;e.r();S.undo.push(e);afterChange(true);}
 function refreshHist(){const u=$('#ed-undo'),r=$('#ed-redo');if(u)u.disabled=!S.undo.length;if(r)r.disabled=!S.redo.length;}
 function afterChange(structural){if(S.fi>=S.proj.frames.length)S.fi=S.proj.frames.length-1;if(S.li>=S.proj.layers.length)S.li=S.proj.layers.length-1;
   refreshHist();if(structural){buildStrip();buildLayers();markDoc();}needsRender();thumbSoon(S.fi);}
@@ -1098,7 +1141,7 @@ function strokeEnd(e){const s=S.stroke;if(!s)return;
   // normal brush spacing, so short strokes and stroke endings aren't clipped.
   if(Math.hypot(s.sm.x-s.last.x,s.sm.y-s.last.y)>.12)stampAt(s.sm.x,s.sm.y,s.sm.p);
   onionCache=null;const op={type:'brush',brush:s.brushId,color:s.st.color,size:s.st.size,opacity:s.opacity,commit:s.b.commit,q:S.proj.q||1,sym:s.sym,seed:s.seed,points:s.points.slice(),erase:!!s.b.erase};S.stroke=null;appendVector(F(),s.l,op);needsRender();}
-function strokeCancel(){if(!S.stroke)return;S.stroke=null;onionCache=null;needsRender();}
+function strokeCancel(){dbg('strokeCancel');if(!S.stroke)return;S.stroke=null;onionCache=null;needsRender();}
 
 /* ===== vector path rendering ===== */
 let vecScratch=null,vecScratchUsed=null,layerScratchC=null;
@@ -1285,7 +1328,7 @@ function renderVectorOp(ctx,op,p=S.proj){
   ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=(ctx.globalAlpha||1)*(op.erase?1:((op.commit==null?1:op.commit)*(op.opacity==null?100:op.opacity)/100));ctx.globalCompositeOperation=op.erase?'destination-out':'source-over';ctx.drawImage(vecScratch,0,0);ctx.restore();vecScratchUsed=bounds;
 }
 function liveVectorOp(s){if(!s)return null;if(s.shape)return s.op;return {type:'brush',brush:s.brushId,color:s.st.color,size:s.st.size,opacity:s.opacity,commit:s.b.commit,q:S.proj.q||1,sym:s.sym,seed:s.seed,points:s.points,erase:!!s.b.erase};}
-function appendVector(f,l,op){const ops=vectorList(f,l,true),at=ops.length;ops.push(op);invalidateLayerCache(f,l.id);const put=on=>{const a=vectorList(f,l,true),idx=a.indexOf(op);if(on){if(idx<0)a.splice(Math.min(at,a.length),0,op);}else if(idx>=0)a.splice(idx,1);setVectorList(f,l.id,a);markDoc();needsRender();thumbSoon(S.fi);};pushH({u:()=>put(false),r:()=>put(true)});markDoc();needsRender();thumbSoon(S.fi);}
+function appendVector(f,l,op){dbg('stroke-commit','type='+op.type);const ops=vectorList(f,l,true),at=ops.length;ops.push(op);invalidateLayerCache(f,l.id);const put=on=>{const a=vectorList(f,l,true),idx=a.indexOf(op);if(on){if(idx<0)a.splice(Math.min(at,a.length),0,op);}else if(idx>=0)a.splice(idx,1);setVectorList(f,l.id,a);markDoc();needsRender();thumbSoon(S.fi);};pushH({u:()=>put(false),r:()=>put(true)});markDoc();needsRender();thumbSoon(S.fi);}
 function rasterizedLayerCel(f,l){const p=S.proj,base=f.cels[l.id],ops=vectorList(f,l,false);if(!base&&!ops.length)return null;const c=mk(p.w,p.h),x=c.getContext('2d');if(base)x.drawImage(base,0,0);for(const op of ops)renderVectorOp(x,op,p);return c;}
 
 /* ===== fill (gap-closing flood fill) ===== */
@@ -1341,11 +1384,32 @@ function makeFloat(path,whole){if(!layerOk())return;const f=F(),l=L(),source=ras
   const clipPath=(c,ox,oy)=>{c.beginPath();path.forEach(([x,y],i)=>i?c.lineTo(x-ox,y-oy):c.moveTo(x-ox,y-oy));c.closePath();};
   fc.save();clipPath(fc,bx,by);fc.clip();fc.drawImage(source,-bx,-by);fc.restore();
   const c=cel.getContext('2d');c.save();clipPath(c,0,0);c.clip();c.clearRect(0,0,cel.width,cel.height);c.restore();
-  S.sel={fl,cx:bx+bw/2,cy:by+bh/2,w:bw,h:bh,rot:0,sx:1,sy:1,hist,f,l,bb:{x:bx,y:by,w:bw,h:bh},drag:null};showSelBar();needsRender();}
+  S.sel={fl,cx:bx+bw/2,cy:by+bh/2,w:bw,h:bh,rot:0,sx:1,sy:1,hist,f,l,bb:{x:bx,y:by,w:bw,h:bh},drag:null,outline:path.map(([x,y])=>[x-(bx+bw/2),y-(by+bh/2)])};showSelBar();antsKick();needsRender();}
 function selW(lx,ly,s=S.sel){const c=Math.cos(s.rot),n=Math.sin(s.rot);return [s.cx+c*s.sx*lx-n*s.sy*ly,s.cy+n*s.sx*lx+c*s.sy*ly];}
-function selHandles(){const s=S.sel,sg=Math.sign(s.sy)||1,top=selW(0,-s.h/2),k=38/S.zoom;return {rot:[top[0]+Math.sin(s.rot)*sg*k,top[1]-Math.cos(s.rot)*sg*k],scale:selW(s.w/2,s.h/2),top};}
-function selHit(x,y){const s=S.sel,h=selHandles(),r=26/S.zoom;if(Math.hypot(x-h.rot[0],y-h.rot[1])<r)return 'rot';if(Math.hypot(x-h.scale[0],y-h.scale[1])<r)return 'scale';
-  const dx=x-s.cx,dy=y-s.cy,c=Math.cos(s.rot),n=Math.sin(s.rot),lx=(dx*c+dy*n)/s.sx,ly=(-dx*n+dy*c)/s.sy;return Math.abs(lx)<=s.w/2&&Math.abs(ly)<=s.h/2?'body':null;}
+function edgesOn(){const s=S.sel;return s.w*Math.abs(s.sx)*S.zoom>70&&s.h*Math.abs(s.sy)*S.zoom>70;}
+function selHandles(){const s=S.sel,sg=Math.sign(s.sy)||1,top=selW(0,-s.h/2),k=44/S.zoom,w2=s.w/2,h2=s.h/2;
+  return {rot:[top[0]+Math.sin(s.rot)*sg*k,top[1]-Math.cos(s.rot)*sg*k],top,
+    corners:[[-1,-1],[1,-1],[1,1],[-1,1]].map(([hx,hy])=>({hx,hy,p:selW(hx*w2,hy*h2)})),
+    edges:[{axis:'x',hx:1,hy:0,p:selW(w2,0)},{axis:'x',hx:-1,hy:0,p:selW(-w2,0)},{axis:'y',hx:0,hy:1,p:selW(0,h2)},{axis:'y',hx:0,hy:-1,p:selW(0,-h2)}]};}
+function selHit(x,y){const s=S.sel,h=selHandles(),r=24/S.zoom,d=q=>Math.hypot(x-q[0],y-q[1]);
+  if(d(h.rot)<r)return {hit:'rot'};
+  for(const c of h.corners)if(d(c.p)<r)return {hit:'corner',hx:c.hx,hy:c.hy};
+  if(edgesOn())for(const e of h.edges)if(d(e.p)<r*.9)return {hit:'edge',axis:e.axis,hx:e.hx,hy:e.hy};
+  const dx=x-s.cx,dy=y-s.cy,c=Math.cos(s.rot),n=Math.sin(s.rot),lx=(dx*c+dy*n)/s.sx,ly=(-dx*n+dy*c)/s.sy;return Math.abs(lx)<=s.w/2&&Math.abs(ly)<=s.h/2?{hit:'body'}:null;}
+/* scaling keeps the opposite corner/edge pinned, like commercial apps */
+function startSelDrag(hit,x,y){const s=S.sel,d={...hit,x,y,cx:s.cx,cy:s.cy,rot:s.rot,sx:s.sx,sy:s.sy,a0:Math.atan2(y-s.cy,x-s.cx),d0:Math.hypot(x-s.cx,y-s.cy)||1};
+  if(hit.hit==='corner'){d.ax=-hit.hx*s.w/2;d.ay=-hit.hy*s.h/2;}else if(hit.hit==='edge'){d.ax=hit.axis==='x'?-hit.hx*s.w/2:0;d.ay=hit.axis==='y'?-hit.hy*s.h/2:0;}
+  if(d.ax!==undefined){d.A=selW(d.ax,d.ay);const H0=selW(hit.hit==='corner'?hit.hx*s.w/2:(hit.axis==='x'?hit.hx*s.w/2:0),hit.hit==='corner'?hit.hy*s.h/2:(hit.axis==='y'?hit.hy*s.h/2:0));d.dA=Math.hypot(H0[0]-d.A[0],H0[1]-d.A[1])||1;}
+  s.drag=d;}
+function anchorFix(s,d){const c=Math.cos(s.rot),n=Math.sin(s.rot);s.cx=d.A[0]-(c*s.sx*d.ax-n*s.sy*d.ay);s.cy=d.A[1]-(n*s.sx*d.ax+c*s.sy*d.ay);}
+function dragSel(x,y){const s=S.sel,d=s.drag;if(!d)return;
+  if(d.hit==='body'){s.cx=d.cx+x-d.x;s.cy=d.cy+y-d.y;}
+  else if(d.hit==='rot'){let r=d.rot+Math.atan2(y-s.cy,x-s.cx)-d.a0;const st=Math.PI/12,q=Math.round(r/st)*st;if(Math.abs(r-q)<.06)r=q;s.rot=r;}
+  else if(d.hit==='corner'){const k=Math.max(.04,Math.hypot(x-d.A[0],y-d.A[1])/d.dA);s.sx=d.sx*k;s.sy=d.sy*k;anchorFix(s,d);}
+  else if(d.hit==='edge'){const c=Math.cos(d.rot),n=Math.sin(d.rot);
+    if(d.axis==='x'){const sg=Math.sign(d.sx)||1,dist=(x-d.A[0])*d.hx*sg*c+(y-d.A[1])*d.hx*sg*n;s.sx=sg*Math.max(.04,dist/s.w);}
+    else{const sg=Math.sign(d.sy)||1,dist=(x-d.A[0])*(-d.hy*sg*n)+(y-d.A[1])*(d.hy*sg*c);s.sy=sg*Math.max(.04,dist/s.h);}
+    anchorFix(s,d);}}
 function floatDraw(c,s){c.save();c.translate(s.cx,s.cy);c.rotate(s.rot);c.scale(s.sx,s.sy);c.drawImage(s.fl,-s.w/2,-s.h/2);c.restore();}
 function unionBB(a,b){const x0=Math.min(a.x,b.x),y0=Math.min(a.y,b.y),x1=Math.max(a.x+a.w,b.x+b.w),y1=Math.max(a.y+a.h,b.y+b.h);return {x:x0,y:y0,w:x1-x0,h:y1-y0};}
 function selBounds(s=S.sel){const pts=[[-s.w/2,-s.h/2],[s.w/2,-s.h/2],[s.w/2,s.h/2],[-s.w/2,s.h/2]].map(([x,y])=>selW(x,y,s));
@@ -1356,22 +1420,43 @@ function commitFloat(cancel){const s=S.sel;if(!s)return;S.sel=null;hideSelBar();
 function stampFloat(){const s=S.sel;if(!s)return;const c=getCel(s.f,s.l,true).getContext('2d');floatDraw(c,s);s.bb=unionBB(s.bb,selBounds());toast('Copy placed. Move the original away.');needsRender();}
 function deleteFloat(){const s=S.sel;if(!s)return;S.sel=null;hideSelBar();endPix(s.hist,s.bb);needsRender();}
 function flipFloat(axis){const s=S.sel;if(!s)return;if(axis==='h')s.sx*=-1;else s.sy*=-1;needsRender();}
-function showSelBar(){let b=$('#selbar');if(!b){b=document.createElement('div');b.id='selbar';b.className='panel';b.style.cssText='position:absolute;left:50%;transform:translateX(-50%);bottom:10px;z-index:4;flex-direction:row;gap:4px;padding:6px';
-  b.innerHTML=`<button class="iconbtn" data-a="flip-h" aria-label="Flip horizontally">${ic('fliph')}</button><button class="iconbtn" data-a="flip-v" aria-label="Flip vertically">${ic('flipv')}</button><button class="iconbtn" data-a="copy" aria-label="Place a copy">${ic('copy')}</button><button class="iconbtn" data-a="del" aria-label="Delete selection">${ic('trash')}</button><button class="btn pri" data-a="ok">${ic('check')}Done</button>`;
-  $('#stagewrap').appendChild(b);b.addEventListener('click',e=>{const a=e.target.closest('[data-a]')?.dataset.a;if(a==='flip-h')flipFloat('h');else if(a==='flip-v')flipFloat('v');else if(a==='copy')stampFloat();else if(a==='del')deleteFloat();else if(a==='ok')commitFloat();});}b.hidden=false;}
+function showSelBar(){let b=$('#selbar');if(!b){b=document.createElement('div');b.id='selbar';b.className='panel';b.style.cssText='position:absolute;left:50%;top:10px;transform:translateX(-50%);z-index:6;display:flex;flex-direction:row;align-items:center;gap:2px;padding:4px 6px;border-radius:18px;box-shadow:0 8px 24px var(--shadow)';
+  b.innerHTML=`<button class="iconbtn" data-a="cancel" aria-label="Cancel selection edits" style="width:38px;height:38px;font-size:18px">\u2715</button><span class="sep"></span><button class="iconbtn" data-a="flip-h" aria-label="Flip horizontally" style="width:38px;height:38px">${ic('fliph')}</button><button class="iconbtn" data-a="flip-v" aria-label="Flip vertically" style="width:38px;height:38px">${ic('flipv')}</button><button class="iconbtn" data-a="copy" aria-label="Place a copy" style="width:38px;height:38px">${ic('copy')}</button><button class="iconbtn" data-a="del" aria-label="Delete selection" style="width:38px;height:38px">${ic('trash')}</button><button class="btn pri" data-a="ok" style="height:38px;border-radius:14px">${ic('check')}Done</button>`;
+  $('#stagewrap').appendChild(b);b.addEventListener('pointerdown',e=>e.stopPropagation());b.addEventListener('click',e=>{const a=e.target.closest('[data-a]')?.dataset.a;if(a==='flip-h')flipFloat('h');else if(a==='flip-v')flipFloat('v');else if(a==='copy')stampFloat();else if(a==='del')deleteFloat();else if(a==='ok')commitFloat();else if(a==='cancel')commitFloat(true);});}b.hidden=false;}
 function hideSelBar(){const b=$('#selbar');if(b)b.hidden=true;}
 
 /* ===== overlay (selection, lasso, cursor, symmetry axes) ===== */
 let lasso=null;S.hover=null;
+/* marching ants: black base + moving white dashes, readable on any artwork */
+let antsRaf=0,antsLast=0;
+function antsKick(){if(antsRaf)return;const tick=()=>{antsRaf=0;if(S.view==='editor'&&!S.playing&&S.proj&&(S.sel||lasso)){const t=performance.now();if(t-antsLast>45){antsLast=t;try{drawFx();}catch(e){}}antsRaf=requestAnimationFrame(tick);}};antsRaf=requestAnimationFrame(tick);}
+function ants(c,pts,z,closed){c.save();c.lineJoin='round';c.beginPath();pts.forEach(([x,y],i)=>i?c.lineTo(x,y):c.moveTo(x,y));if(closed)c.closePath();
+  c.setLineDash([]);c.lineWidth=2.6/z;c.strokeStyle='rgba(0,0,0,.7)';c.stroke();c.lineWidth=1.6/z;c.strokeStyle='#fff';c.setLineDash([6/z,6/z]);c.lineDashOffset=-((performance.now()/55)%12)/z;c.stroke();c.restore();}
+function drawLassoPath(c,pts,z){c.save();c.beginPath();pts.forEach(([x,y],i)=>i?c.lineTo(x,y):c.moveTo(x,y));c.closePath();c.fillStyle='rgba(77,124,255,.16)';c.fill();c.restore();
+  ants(c,pts,z,false);const a=pts[0],b=pts[pts.length-1];
+  c.save();c.setLineDash([3/z,5/z]);c.lineWidth=1.4/z;c.strokeStyle='rgba(255,255,255,.95)';c.beginPath();c.moveTo(b[0],b[1]);c.lineTo(a[0],a[1]);c.stroke();c.setLineDash([]);
+  c.beginPath();c.arc(a[0],a[1],5/z,0,6.283);c.fillStyle='#fff';c.fill();c.lineWidth=1.8/z;c.strokeStyle='#4d7cff';c.stroke();c.restore();}
+function drawSelUI(c,s,z){
+  const rect=[[-s.w/2,-s.h/2],[s.w/2,-s.h/2],[s.w/2,s.h/2],[-s.w/2,s.h/2]],shape=(s.outline&&s.outline.length>2?s.outline:rect).map(q=>selW(q[0],q[1],s)),box=rect.map(q=>selW(q[0],q[1],s));
+  c.save();c.beginPath();shape.forEach((q,i)=>i?c.lineTo(q[0],q[1]):c.moveTo(q[0],q[1]));c.closePath();c.fillStyle='rgba(77,124,255,.07)';c.fill();c.restore();
+  ants(c,shape,z,true);
+  c.save();c.beginPath();box.forEach((q,i)=>i?c.lineTo(q[0],q[1]):c.moveTo(q[0],q[1]));c.closePath();c.lineWidth=1.2/z;c.strokeStyle='rgba(77,124,255,.9)';c.stroke();
+  const h=selHandles();c.beginPath();c.moveTo(h.top[0],h.top[1]);c.lineTo(h.rot[0],h.rot[1]);c.stroke();
+  const dot=(p,r,fill,stroke)=>{c.beginPath();c.arc(p[0],p[1],r/z,0,6.283);c.shadowColor='rgba(0,0,0,.4)';c.shadowBlur=5;c.fillStyle=fill;c.fill();c.shadowBlur=0;c.lineWidth=1.8/z;c.strokeStyle=stroke;c.stroke();};
+  if(edgesOn())for(const e of h.edges)dot(e.p,6,'#fff','#4d7cff');
+  for(const q of h.corners)dot(q.p,8.5,'#fff','#4d7cff');
+  dot(h.rot,10,'#4d7cff','#fff');
+  c.restore();positionSelBar();}
+function positionSelBar(){const b=$('#selbar'),s=S.sel;if(!b||b.hidden||!s)return;const w=$('#stagewrap'),W=w.clientWidth,H=w.clientHeight,bb=selBounds(s),z=S.zoom,bw=b.offsetWidth||280,bh=b.offsetHeight||48;
+  let x=(bb.x+bb.w/2)*z+S.tx,y=bb.y*z+S.ty-44-bh-8;if(y<8)y=(bb.y+bb.h)*z+S.ty+16;x=clamp(x,bw/2+8,W-bw/2-8);y=clamp(y,8,Math.max(8,H-bh-90));
+  b.style.left=x+'px';b.style.top=y+'px';b.style.bottom='auto';}
 function drawFx(){sizeFx();const f=fx(),c=f.getContext('2d'),p=S.proj,z=S.zoom,d=window.devicePixelRatio||1;c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,f.width,f.height);if(S.playing)return;
   c.setTransform(d*z,0,0,d*z,d*S.tx,d*S.ty);c.imageSmoothingEnabled=z<1;
   const pg=p.perspectiveGuide;if(pg&&pg.enabled){c.save();c.strokeStyle='rgba(80,190,230,.48)';c.lineWidth=1/z;c.setLineDash([5/z,4/z]);const vx=clamp(+pg.x||.5,0,1)*p.w,vy=clamp(+pg.y||.35,0,1)*p.h;c.beginPath();for(let i=0;i<=Math.max(4,Math.min(32,+pg.rays||12));i++){const bx=i*p.w/Math.max(4,Math.min(32,+pg.rays||12));c.moveTo(vx,vy);c.lineTo(bx,p.h);}for(let i=1;i<=Math.max(1,Math.min(12,+pg.horizontals||5));i++){const yy=vy+(p.h-vy)*(i/(Math.max(1,Math.min(12,+pg.horizontals||5))+1));c.moveTo(0,yy);c.lineTo(p.w,yy);}c.stroke();c.setLineDash([]);c.fillStyle='rgba(80,190,230,.8)';c.beginPath();c.arc(vx,vy,4/z,0,6.283);c.fill();c.restore();}
   if(p.motionPath&&p.motionPath.length){c.save();c.strokeStyle='rgba(255,210,65,.92)';c.fillStyle='rgba(255,210,65,.95)';c.lineWidth=2/z;c.setLineDash([7/z,5/z]);c.beginPath();p.motionPath.forEach((q,i)=>i?c.lineTo(q.x,q.y):c.moveTo(q.x,q.y));c.stroke();c.setLineDash([]);p.motionPath.forEach((q,i)=>{c.beginPath();c.arc(q.x,q.y,3.5/z,0,6.283);c.fill();});c.restore();}
   if(S.sym!=='off'){c.save();c.strokeStyle='rgba(239,75,63,.7)';c.lineWidth=1/z;c.setLineDash([6/z,5/z]);c.beginPath();if(S.sym!=='v'){c.moveTo(p.w/2,0);c.lineTo(p.w/2,p.h);}if(S.sym!=='h'){c.moveTo(0,p.h/2);c.lineTo(p.w,p.h/2);}c.stroke();c.restore();}
-  if(S.sel){const s=S.sel;floatDraw(c,s);c.save();c.strokeStyle='#4d7cff';c.lineWidth=1.5/z;c.setLineDash([6/z,4/z]);c.beginPath();[[-s.w/2,-s.h/2],[s.w/2,-s.h/2],[s.w/2,s.h/2],[-s.w/2,s.h/2]].forEach(([x,y],i)=>{const q=selW(x,y);i?c.lineTo(q[0],q[1]):c.moveTo(q[0],q[1]);});c.closePath();c.stroke();c.setLineDash([]);
-    const h=selHandles();c.beginPath();c.moveTo(h.top[0],h.top[1]);c.lineTo(h.rot[0],h.rot[1]);c.stroke();c.fillStyle='#fff';c.strokeStyle='#4d7cff';c.lineWidth=2/z;
-    for(const q of [h.rot,h.scale]){c.beginPath();c.arc(q[0],q[1],9/z,0,6.283);c.fill();c.stroke();}c.restore();}
-  if(lasso&&lasso.length>1){c.save();c.strokeStyle='#4d7cff';c.lineWidth=2/z;c.setLineDash([7/z,5/z]);c.beginPath();lasso.forEach(([x,y],i)=>i?c.lineTo(x,y):c.moveTo(x,y));c.stroke();c.restore();}
+  if(S.sel){const s=S.sel;floatDraw(c,s);drawSelUI(c,s,z);}
+  if(lasso&&lasso.length>1)drawLassoPath(c,lasso,z);
   if(S.stroke&&S.stroke.raw&&S.stroke.sm&&['brush','eraser'].includes(toolKind())){const rw=S.stroke.raw,sm=S.stroke.sm,dx=sm.x-rw[0],dy=sm.y-rw[1],dl=Math.hypot(dx,dy),R=11/z;c.save();c.strokeStyle='rgba(255,70,70,.95)';c.fillStyle='rgba(255,70,70,.95)';c.lineWidth=1.3/z;c.beginPath();c.arc(rw[0],rw[1],R,0,6.283);c.stroke();if(dl>R){c.beginPath();c.moveTo(rw[0]+dx/dl*R,rw[1]+dy/dl*R);c.lineTo(sm.x,sm.y);c.stroke();}c.beginPath();c.arc(sm.x,sm.y,3.4/z,0,6.283);c.fill();c.restore();}
   if(S.hover&&!S.stroke&&['brush','eraser','shape'].includes(toolKind())){const r=Math.max(1.5,S.size*(p.q||1)/2);c.save();c.lineWidth=1.2/z;c.strokeStyle='rgba(20,20,20,.75)';c.beginPath();c.arc(S.hover[0],S.hover[1],r,0,6.283);c.stroke();c.strokeStyle='rgba(255,255,255,.9)';c.beginPath();c.arc(S.hover[0],S.hover[1],r+1.2/z,0,6.283);c.stroke();c.restore();}}
 const SHAPES=['line','rect','circle'];
@@ -1387,9 +1472,9 @@ function toolDown(e){const k=toolKind();activeTool=null;if(['brush','eraser','fi
   else if(k==='pick'){pickColor(x,y);activeTool='pick';}
   else if(k==='shape'){if(shapeStart(e))activeTool='shape';}
   else if(k==='lasso'||k==='move'){
-    if(S.sel){const hit=selHit(x,y);if(hit){const s=S.sel;s.drag={hit,x,y,cx:s.cx,cy:s.cy,rot:s.rot,sx:s.sx,sy:s.sy,a0:Math.atan2(y-s.cy,x-s.cx),d0:Math.hypot(x-s.cx,y-s.cy)||1};activeTool='sel';return;}commitFloat();}
+    if(S.sel){const hit=selHit(x,y);if(hit){startSelDrag(hit,x,y);activeTool='sel';return;}commitFloat();}
     if(k==='move'){makeFloat(null,true);if(S.sel){S.sel.drag={hit:'body',x,y,cx:S.sel.cx,cy:S.sel.cy,rot:0,sx:1,sy:1,a0:0,d0:1};activeTool='sel';}}
-    else{lasso=[[x,y]];activeTool='lasso';}}
+    else{lasso=[[x,y]];activeTool='lasso';antsKick();}}
   needsRender();}
 function toolMove(e){const evs=e.getCoalescedEvents?e.getCoalescedEvents():[];const list=evs.length?evs:[e];
   if(activeTool==='stroke'){for(const ev of list){const [x,y]=toCanvasXY(ev),pr=ev.pointerType==='pen'?Math.max(.15,ev.pressure||.5):1;strokeTo(x,y,pr);}}
@@ -1397,9 +1482,7 @@ function toolMove(e){const evs=e.getCoalescedEvents?e.getCoalescedEvents():[];co
   else if(activeTool==='pick'){const [x,y]=toCanvasXY(e);pickColor(x,y);}
   else if(activeTool==='lasso'){const [x,y]=toCanvasXY(e),l=lasso[lasso.length-1];if(Math.hypot(x-l[0],y-l[1])>2)lasso.push([x,y]);needsRender();}
   else if(activeTool==='sel'){const [x,y]=toCanvasXY(e),s=S.sel,d=s.drag;
-    if(d.hit==='body'){s.cx=d.cx+x-d.x;s.cy=d.cy+y-d.y;}
-    else if(d.hit==='scale'){const k=Math.max(.05,(Math.hypot(x-s.cx,y-s.cy)||1)/d.d0);s.sx=d.sx*k;s.sy=d.sy*k;}
-    else if(d.hit==='rot'){s.rot=d.rot+Math.atan2(y-s.cy,x-s.cx)-d.a0;}
+    dragSel(x,y);
     needsRender();}}
 function toolUp(e){if(activeTool==='stroke')strokeEnd(e);else if(activeTool==='shape')shapeEnd();
   else if(activeTool==='lasso'){const path=lasso;lasso=null;if(path&&path.length>3)makeFloat(path,false);needsRender();}
@@ -1630,8 +1713,8 @@ function buildStrip(){onionCache=null;const st=$('#strip'),p=S.proj;st.innerHTML
   thumbAll();}
 function refreshHold(){if(!S.proj||!F())return;const h=F().hold||1,sl=$('#holdsl');if(!sl)return;sl.value=h;const ms=Math.round(h*1000/Math.max(1,S.proj.fps));$('#holdval').textContent=(h>1?'\u00d7'+h+' \u00b7 ':'')+ms+'ms';}
 function markSel(){refreshHold();$$('#strip .fr').forEach((e,i)=>{e.classList.toggle('sel',i===(S.playing?S.playFi:S.fi));e.classList.toggle('multiSel',selectedFrames.has(i));});const e=$('#strip').children[S.playing?S.playFi:S.fi];if(e){const s=$('#strip'),l=e.offsetLeft-s.offsetLeft;if(l<s.scrollLeft||l+e.offsetWidth>s.scrollLeft+s.clientWidth)s.scrollTo({left:l-s.clientWidth/2+e.offsetWidth/2,behavior:S.playing?'auto':'smooth'});}}
-function gotoFrame(i){onionCache=null;if(S.playing)stopPlay();i=clamp(i,0,S.proj.frames.length-1);commitFloat();S.fi=i;markSel();refreshBgHint();syncLayerOp();refreshRotoPanel();needsRender();}
-function addFrame(at,src){const p=S.proj,nf=newFrame();if(src){nf.hold=src.hold;nf.note=src.note||'';nf.poseMarker=src.poseMarker||'';for(const k in src.cels)nf.cels[k]=snapCel(src.cels[k]);nf.vectors=cloneVectors(src.vectors);nf.links={...(src.links||{})};nf.bg=src.bg?{...src.bg,bmp:null,loading:false}:null;}
+function gotoFrame(i){dbg('goto',String(i));onionCache=null;if(S.playing)stopPlay();i=clamp(i,0,S.proj.frames.length-1);commitFloat();S.fi=i;markSel();refreshBgHint();syncLayerOp();refreshRotoPanel();needsRender();}
+function addFrame(at,src){const p=S.proj,nf=newFrame();dbg('addFrame','at='+at+(src?' dup':''));if(src){nf.hold=src.hold;nf.note=src.note||'';nf.poseMarker=src.poseMarker||'';for(const k in src.cels)nf.cels[k]=snapCel(src.cels[k]);nf.vectors=cloneVectors(src.vectors);nf.links={...(src.links||{})};nf.bg=src.bg?{...src.bg,bmp:null,loading:false}:null;}
   p.frames.splice(at,0,nf);const prev=S.fi;S.fi=at;Object.keys(nf.cels).forEach(k=>S.dirtyCels.add(nf.id+'|'+k));
   pushH({u:()=>{const j=p.frames.indexOf(nf);if(j>=0)p.frames.splice(j,1);S.fi=Math.min(prev,p.frames.length-1);},r:()=>{p.frames.splice(at,0,nf);S.fi=at;Object.keys(nf.cels).forEach(k=>S.dirtyCels.add(nf.id+'|'+k));}});
   buildStrip();markSel();markDoc();needsRender();}
@@ -1640,11 +1723,11 @@ function setLayerSnapshot(f,lid,state){if(!f.links)f.links={};if(state.link)f.li
 function linkedChainTouches(f,lid,removedIds){let cur=f;const seen=new Set();while(cur&&cur.links&&cur.links[lid]&&!seen.has(cur.id)){seen.add(cur.id);const nextId=cur.links[lid];if(removedIds.has(nextId))return true;const next=S.proj.frames.find(x=>x.id===nextId);if(!next)return false;cur=next;}return false;}
 function prepareIncomingLinkChanges(removedFrames){const p=S.proj,ids=new Set(removedFrames.map(f=>f.id)),out=[];for(const f of p.frames){if(ids.has(f.id))continue;for(const l of p.layers){if(!linkedChainTouches(f,l.id,ids))continue;const before=layerSnapshot(f,l.id),src=resolveLinkedFrame(f,l.id);let after;if(src&&!ids.has(src.id)&&src.id!==f.id){after={...before,link:src.id};}else{const terminal=src||f;after={link:null,cel:terminal.cels&&terminal.cels[l.id]?snapCel(terminal.cels[l.id]):null,ops:cloneVectors(terminal.vectors&&terminal.vectors[l.id]||[])};}out.push({f,lid:l.id,before,after});}}return out;}
 function applyIncomingLinkChanges(changes,which){for(const q of changes)setLayerSnapshot(q.f,q.lid,q[which]);}
-function removeFrames(indices,announce=false){const p=S.proj,unique=[...new Set(indices)].filter(i=>Number.isInteger(i)&&i>=0&&i<p.frames.length).sort((a,b)=>a-b);if(!unique.length)return false;if(unique.length>=p.frames.length){toast('At least one frame must remain');return false;}const oldFi=S.fi,oldSelected=[...selectedFrames],oldRange=p.playRange?{...p.playRange}:null,oldFrameCount=p.frames.length,removed=unique.map(i=>({i,f:p.frames[i]})),incoming=prepareIncomingLinkChanges(removed.map(q=>q.f)),lessThan=x=>unique.filter(i=>i<x).length,adjustRange=()=>{if(!oldRange)return;const a=clamp((+oldRange.start||0)-lessThan(+oldRange.start||0),0,p.frames.length-1),oldEnd=oldRange.end==null?oldFrameCount-1:+oldRange.end,b=clamp(oldEnd-lessThan(oldEnd),a,p.frames.length-1);p.playRange={...oldRange,start:a,end:b};};applyIncomingLinkChanges(incoming,'after');for(const q of [...removed].sort((a,b)=>b.i-a.i))p.frames.splice(q.i,1);adjustRange();const newFi=clamp(oldFi-lessThan(oldFi),0,p.frames.length-1);S.fi=newFi;selectedFrames.clear();const restoreProjectView=()=>{buildStrip();markSel();refreshRangeButton();needsRender();};
+function removeFrames(indices,announce=false){dbg('removeFrames',JSON.stringify(indices));const p=S.proj,unique=[...new Set(indices)].filter(i=>Number.isInteger(i)&&i>=0&&i<p.frames.length).sort((a,b)=>a-b);if(!unique.length)return false;if(unique.length>=p.frames.length){toast('At least one frame must remain');return false;}const oldFi=S.fi,oldSelected=[...selectedFrames],oldRange=p.playRange?{...p.playRange}:null,oldFrameCount=p.frames.length,removed=unique.map(i=>({i,f:p.frames[i]})),incoming=prepareIncomingLinkChanges(removed.map(q=>q.f)),lessThan=x=>unique.filter(i=>i<x).length,adjustRange=()=>{if(!oldRange)return;const a=clamp((+oldRange.start||0)-lessThan(+oldRange.start||0),0,p.frames.length-1),oldEnd=oldRange.end==null?oldFrameCount-1:+oldRange.end,b=clamp(oldEnd-lessThan(oldEnd),a,p.frames.length-1);p.playRange={...oldRange,start:a,end:b};};applyIncomingLinkChanges(incoming,'after');for(const q of [...removed].sort((a,b)=>b.i-a.i))p.frames.splice(q.i,1);adjustRange();const newFi=clamp(oldFi-lessThan(oldFi),0,p.frames.length-1);S.fi=newFi;selectedFrames.clear();const restoreProjectView=()=>{buildStrip();markSel();refreshRangeButton();needsRender();};
   pushH({u:()=>{for(const q of removed)p.frames.splice(q.i,0,q.f);applyIncomingLinkChanges(incoming,'before');S.fi=clamp(oldFi,0,p.frames.length-1);selectedFrames.clear();oldSelected.forEach(i=>{if(i>=0&&i<p.frames.length)selectedFrames.add(i);});if(oldRange)p.playRange={...oldRange};removed.forEach(q=>Object.keys(q.f.cels||{}).forEach(k=>S.dirtyCels.add(q.f.id+'|'+k)));markDoc();restoreProjectView();},r:()=>{applyIncomingLinkChanges(incoming,'after');for(const q of [...removed].sort((a,b)=>b.i-a.i)){const i=p.frames.indexOf(q.f);if(i>=0)p.frames.splice(i,1);}adjustRange();S.fi=clamp(newFi,0,p.frames.length-1);selectedFrames.clear();markDoc();restoreProjectView();}});markDoc();restoreProjectView();if(announce)toast(`Deleted ${unique.length} frame${unique.length===1?'':'s'}`);return true;}
 function delFrame(){if(S.proj.frames.length<2){clearFrame();return;}removeFrames([S.fi]);}
 function clearFrame(){const f=F(),old=f.cels,oldV=cloneVectors(f.vectors),oldLinks={...(f.links||{})},keys=new Set([...Object.keys(old),...Object.keys(oldV),...Object.keys(oldLinks)]);f.cels={};f.vectors={};f.links={};keys.forEach(k=>S.dirtyCels.add(f.id+'|'+k));pushH({u:()=>{f.cels=old;f.vectors=cloneVectors(oldV);f.links={...oldLinks};keys.forEach(k=>S.dirtyCels.add(f.id+'|'+k));markDoc();needsRender();},r:()=>{f.cels={};f.vectors={};f.links={};keys.forEach(k=>S.dirtyCels.add(f.id+'|'+k));markDoc();needsRender();}});markDoc();needsRender();thumbSoon(S.fi);}
-function moveFrameTo(from,to){const p=S.proj;if(from===to||from<0||to<0||from>=p.frames.length||to>=p.frames.length)return;commitFloat();const prevFi=S.fi,mv=(a,b)=>{const [x]=p.frames.splice(a,1);p.frames.splice(b,0,x);};mv(from,to);S.fi=to;selectedFrames.clear();
+function moveFrameTo(from,to){dbg('moveFrameTo',from+'->'+to);const p=S.proj;if(from===to||from<0||to<0||from>=p.frames.length||to>=p.frames.length)return;commitFloat();const prevFi=S.fi,mv=(a,b)=>{const [x]=p.frames.splice(a,1);p.frames.splice(b,0,x);};mv(from,to);S.fi=to;selectedFrames.clear();
   pushH({u:()=>{mv(to,from);S.fi=prevFi;},r:()=>{mv(from,to);S.fi=to;}});buildStrip();markSel();markDoc();needsRender();}
 function initFrameDrag(){const st=$('#strip');if(!st||st._dragInit)return;st._dragInit=true;
   const HOLD=380,SLOP_T=10,SLOP_M=6;let pend=null,drag=null,lastEnd=0;
@@ -2170,6 +2253,8 @@ function initFloatUI(){
     R.addEventListener('input',()=>{N.value=R.value;});
     N.addEventListener('input',()=>{if(N.value==='')return;const v=clamp(Math.round(+N.value),+R.min,+R.max);if(!isFinite(v))return;if(String(v)!==N.value)N.value=v;R.value=v;R.dispatchEvent(new Event('input',{bubbles:true}));});
     N.addEventListener('change',()=>{N.value=R.value;});});
+  const sc=$('#on-selfcheck');if(sc){DBG.verify=lsGet('fb.onionSelfCheck',true)!==false;sc.checked=DBG.verify;sc.addEventListener('change',e=>{DBG.verify=e.target.checked;lsSet('fb.onionSelfCheck',DBG.verify);if(DBG.verify)needsRender();});}
+  const cl=$('#on-copylog');if(cl)cl.onclick=()=>{const txt='onion bug log\n'+DBG.log.join('\n');(navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(txt):Promise.reject()).then(()=>toast('Bug log copied'),()=>{window.prompt('Copy this bug log:',txt);});};
 }
 function initExtras(){$$('.fsbtn').forEach(b=>b.onclick=toggleFullscreen);document.addEventListener('fullscreenchange',syncFs);document.addEventListener('webkitfullscreenchange',syncFs);window.addEventListener('resize',()=>{if(S.view==='editor'&&S.proj){sizeCanvases();if(fsEl())fitView();needsRender();}});window.addEventListener('orientationchange',()=>{if(S.view==='editor'&&S.proj)setTimeout(()=>{sizeCanvases();if(fsEl())fitView();needsRender();},180);});
   $('#hm-settings').onclick=showSettings;$('#st-back').onclick=hideSettings;$('#st-pen').onchange=e=>{S.penOnly=e.target.checked;lsSet('fb.penonly',S.penOnly);};
