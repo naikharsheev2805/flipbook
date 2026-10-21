@@ -955,7 +955,16 @@ function renderView(){const p=S.proj;if(!p)return;if(S.vg){S.vg=false;clearTimeo
     if(!DBG.retry){DBG.retry=1;setTimeout(()=>{DBG.retry=0;needsRender();},60);}}
   if(typeof drawFx==='function')drawFx();S.rt=performance.now()-t0;lastRT=performance.now();
   if(!S.playing&&!S.stroke){const n=S.onion,sig=S.fi+'/'+p.frames.length+' b'+n.b+' a'+n.a+(n.on?'':' OFF')+(n.activeLayerOnly?' layerOnly':'');if(sig!==DBG.lastSig){DBG.lastSig=sig;dbg('render',sig+' ids='+p.frames.slice(Math.max(0,S.fi-n.b),S.fi+n.a+1).map(q=>q.id.toString().slice(-4)).join(','));}}
-  if(DBG.verify&&!S.playing&&!S.stroke){clearTimeout(DBG.t);DBG.t=setTimeout(verifyView,550);}}
+  if(DBG.verify&&!S.playing&&!S.stroke){
+    // Debounced on each render so a settled view gets checked quickly (180ms), but a forced
+    // floor (DBG.vFirst, started on the FIRST render of a burst) guarantees a check still runs
+    // every ~220ms even while the user keeps flipping frames back-to-back — previously this
+    // timer was cancelled and restarted on every single goto, so continuous flipping (the
+    // normal onion-skinning workflow) could defer the check and its auto-repair indefinitely.
+    if(DBG.t)clearTimeout(DBG.t);else dbg('verify-scheduled');
+    DBG.t=setTimeout(()=>{DBG.t=0;clearTimeout(DBG.vFirst);DBG.vFirst=0;verifyView();},180);
+    if(!DBG.vFirst)DBG.vFirst=setTimeout(()=>{DBG.vFirst=0;clearTimeout(DBG.t);DBG.t=0;dbg('verify-forced');verifyView();},220);
+  }}
 /* Self-check: re-render the current view with every cache emptied and compare to what is on screen.
    If they differ, a cache served stale pixels (the "that isn't supposed to happen" ghost). Log it and repair. */
 function verifyView(){try{
