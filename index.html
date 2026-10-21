@@ -730,7 +730,6 @@ function dbg(ev,data){try{const p=S&&S.proj;DBG.log.push((new Date().toISOString
 // Editor-only, viewport-resolution vector composites keep saved strokes sharp while zooming.
 // This cache is separate from project-resolution bitmaps used by exports and thumbnails.
 const highResLayerCache=new Map();
-let hrLastScale=0,hrChangeT=0,hrTimer=0;
 let hiTintScratchC=null;
 // Onion-skin composites are expensive to rebuild on every animation-frame repaint.
 // Keep colourized project-resolution snapshots and invalidate them on any layer edit.
@@ -799,14 +798,18 @@ function hiResLayerBitmap(src,l,ops,ctx,xf){
       let cand=null;for(const e of highResLayerCache.values()){if(e.full&&e.s0===s0&&e.n&&e.n<ops.length&&ops[0]===e.first&&ops[e.n-1]===e.last&&(!cand||e.n>cand.n))cand=e;}
       if(cand){const bc=cand.canvas.getContext('2d');bc.setTransform(bucket,0,0,bucket,0,0);for(let i=cand.n;i<ops.length;i++)renderVectorOp(bc,ops[i],p);bc.setTransform(1,0,0,1,0,0);
         highResLayerCache.delete(cand.key);cand.n=ops.length;cand.last=ops[ops.length-1];cand.key=key;cand.sig=sig;cacheHiResLayer(key,cand);return cand;}}
-    const nowT=performance.now();
-    if(Math.abs(scale-hrLastScale)>1e-6){hrLastScale=scale;hrChangeT=nowT;}
-    if(nowT-hrChangeT<160){
-      // Zoom is still changing: show the closest cached tier (scaled) instead of re-rendering every stroke.
-      let best=null,bd=1e9;
-      for(const e of highResLayerCache.values()){if(!e.full||e.sig!==sig)continue;const d=Math.abs(Math.log(e.scale/bucket));if(d<bd){bd=d;best=e;}}
-      if(best){clearTimeout(hrTimer);hrTimer=setTimeout(needsRender,180);return best;}
-    }
+    // NOTE: this used to also serve an approximately-scaled cached tier while
+    // "scale is still changing" (tracked via module-global hrLastScale/hrChangeT,
+    // touched by every layer and every onion-skin neighbor frame rendered, not
+    // just an actual pinch-zoom gesture). During a real pinch/zoom, composite()
+    // is only ever called once per gesture (at settle, see settleView/viewMoved
+    // below) — the live transform is a CSS transform with no re-render — so that
+    // shortcut never had a second call within its 160ms window to benefit a real
+    // zoom. What it DID catch was incidental scale jitter between closely-spaced
+    // renders that have nothing to do with zooming (mobile address-bar/keyboard
+    // show-hide resizing #stagewrap), serving a stretched stale-scale bitmap that
+    // could persist for as long as that jitter kept trickling in. Removed; always
+    // build the exact bitmap for the current scale.
     const bitmap=mk(bw,bh),bc=bitmap.getContext('2d',{alpha:true,desynchronized:true});
     bc.clearRect(0,0,bw,bh);bc.setTransform(bucket,0,0,bucket,0,0);
     if(cel){bc.imageSmoothingEnabled=true;bc.imageSmoothingQuality='high';bc.drawImage(cel,0,0);}
