@@ -128,8 +128,13 @@ svg.i.fill{fill:currentColor;stroke:none}
 .refrow button{min-width:28px;height:28px;padding:3px}
 #view{position:absolute;inset:0;width:100%;height:100%;transform:none;box-shadow:0 8px 30px var(--shadow);image-rendering:auto;touch-action:none}
 #fx{position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:none}
-.stagebtns{position:absolute;right:10px;bottom:10px;display:flex;flex-direction:column;gap:6px;z-index:3}
+.stagebtns{position:absolute;right:10px;bottom:10px;display:flex;flex-direction:column;gap:6px;z-index:3;touch-action:none}
 .stagebtns .iconbtn{background:var(--surface);box-shadow:0 2px 8px var(--shadow)}
+.stagebtns-grip{display:flex;align-items:center;justify-content:center;width:100%;height:14px;margin:-2px 0 0;cursor:grab;touch-action:none;flex:none}
+.stagebtns-grip::before{content:"";width:18px;height:3px;border-radius:99px;background:currentColor;opacity:.35}
+.stagebtns-grip:active{cursor:grabbing}
+.stagebtns.dragging{opacity:.85}
+.stagebtns.dragging .stagebtns-grip::before{opacity:.6}
 .toast{position:fixed;left:50%;bottom:calc(150px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:9px 16px;border-radius:99px;font-weight:500;font-size:13px;z-index:60;pointer-events:none;max-width:90vw}
 .side{padding:8px 0 8px 10px;display:flex;flex-direction:column;gap:10px;min-height:0;overflow-y:auto}
 .panel{background:var(--surface);border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:8px}
@@ -385,7 +390,7 @@ body{font-size:14px;letter-spacing:0}
 /* collapsible zoom pill */
 .stagebtns .chev{display:block;width:9px;height:9px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg) translate(-2px,-2px);transition:transform .15s}
 .stagebtns.collapsed .chev{transform:rotate(225deg) translate(-2px,-2px)}
-.stagebtns.collapsed>*:not(#zcollapse){display:none}
+.stagebtns.collapsed>*:not(#zcollapse):not(#stagebtnsGrip){display:none}
 /* Floating tool bar on the canvas: drag it by the grip on its left */
 .rail{position:absolute;z-index:4;flex:none;flex-direction:row;align-items:center;margin:0;width:max-content;max-width:calc(100% - 24px);max-height:none;overflow-x:auto;overflow-y:hidden;--rfx:.5;--rfy:1;left:calc(12px + var(--rfx)*(100% - 24px));top:calc(12px + var(--rfy)*(100% - 24px));transform:translate(calc(var(--rfx)*-100%),calc(var(--rfy)*-100%))}
 .rail .gap{width:1px;height:32px;margin:0 6px}
@@ -424,6 +429,10 @@ body{font-size:14px;letter-spacing:0}
 .tl.folded .tlgrip::before{background:var(--mut);opacity:.75}
 .stagefloat #sf-add{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);box-shadow:0 4px 14px color-mix(in srgb,var(--accent) 45%,transparent)}
 .stagefloat #sf-add:hover{background:var(--accent);filter:brightness(1.08)}
+.stagefloat #sf-key{background:#000;color:#fff;border-color:#000}
+.stagefloat #sf-key:hover{background:#000;filter:brightness(1.3)}
+.stagefloat #sf-key[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.stagefloat #sf-key[aria-pressed="true"]:hover{filter:brightness(1.08)}
 .onionpop{position:absolute;z-index:7;top:60px;right:12px;width:min(320px,calc(100% - 24px));max-height:calc(100% - 140px);overflow-y:auto;border-radius:18px;box-shadow:0 12px 36px var(--shadow)}
 .onionpop[hidden]{display:none}
 .rngnum{display:flex;align-items:center;gap:10px}
@@ -461,6 +470,7 @@ body{font-size:14px;letter-spacing:0}
 <symbol id="i-pick" viewBox="0 0 24 24"><path d="M4 20l1-4 9-9 3 3-9 9z"/><path d="M14 7l2.500-2.500a2 2 0 0 1 3 3L17 10"/></symbol>
 <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></symbol>
 <symbol id="i-redo" viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><circle cx="7" cy="14.5" r="3.5"/><path d="M9.8 12.2L19 3"/><path d="M15 7l2.5 2.5"/><path d="M18 4l2 2"/></symbol>
 <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z" fill="currentColor"/></symbol>
 <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 5h3v14H7zM14 5h3v14h-3z" fill="currentColor"/></symbol>
 <symbol id="i-prev" viewBox="0 0 24 24"><path d="M17 5l-8 7 8 7z"/><path d="M6 5v14"/></symbol>
@@ -574,12 +584,14 @@ body{font-size:14px;letter-spacing:0}
     <div id="presetbar"><div class="phd"><span>Presets</span><span class="row" style="gap:6px"><button class="btn sm" id="presetedit" type="button" aria-pressed="false">Edit</button><button class="btn sm" id="presetsave" type="button">Save current</button></span></div><div id="presetrow"></div></div>
   </div>
   <div class="onionpop" id="onionpop" hidden role="dialog" aria-label="Onion skin settings">
-    <div class="panel"><h4>Onion skin <button class="iconbtn" id="onion-close" type="button" aria-label="Close onion skin settings" style="width:30px;height:30px">×</button></h4>
+    <div class="panel"><h4>Onion skin <span class="seg" style="padding:3px"><button class="iconbtn" id="onion-close" type="button" aria-label="Close onion skin settings" style="width:38px;height:38px;font-size:20px;font-weight:700">×</button></span></h4>
       <label class="fld">Frames before <span class="rngnum"><input type="range" id="on-b" min="0" max="5" value="1"><input type="number" id="on-b-n" min="0" max="5" step="1" value="1" inputmode="numeric" aria-label="Frames before"></span></label>
       <label class="fld">Frames after <span class="rngnum"><input type="range" id="on-a" min="0" max="5" value="1"><input type="number" id="on-a-n" min="0" max="5" step="1" value="1" inputmode="numeric" aria-label="Frames after"></span></label>
       <label class="fld">Strength <input type="range" id="on-o" min="10" max="80" value="40"></label>
       <label class="fld">Fade per step <input type="range" id="on-fade" min="30" max="95" value="72"><span class="hint" id="on-fade-val">72% remaining per frame</span></label>
       <label class="row" style="gap:8px;align-items:center"><input type="checkbox" id="on-active-layer"> Active layer only</label>
+      <div class="fld"><span>Keyframe onion skin</span><div class="seg" id="on-key-mode" role="group" aria-label="Keyframe onion skin"><button data-km="off">Off</button><button data-km="nearest" aria-pressed="true">Nearest</button><button data-km="all">All</button></div></div>
+      <label class="fld">Keyframe colour <input type="color" id="on-key-color" value="#ffb020"></label>
       <label class="fld">Previous-frame colour <input type="color" id="on-prev-color" value="#ff4d4d"></label>
       <label class="fld">Next-frame colour <input type="color" id="on-next-color" value="#35c46a"></label>
       <div class="row"><button class="btn sm" id="on-save-colors">Save colour pair</button><select id="on-color-presets" aria-label="Saved onion colour pairs" style="min-width:0;flex:1"><option value="">Saved pairs…</option></select></div>
@@ -594,11 +606,13 @@ body{font-size:14px;letter-spacing:0}
       <div id="reference-layer" aria-label="Reference images workspace"></div>
       <div class="stagefloat">
         <button id="sf-add" aria-label="Add frame" title="Add frame"><svg class="i"><use href="#i-plus"/></svg></button>
+        <button id="sf-key" aria-label="Mark frame as keyframe" aria-pressed="false" title="Mark this frame as a keyframe"><svg class="i"><use href="#i-key"/></svg></button>
         <button id="sf-audio" aria-label="Import sound" title="Import sound"><svg class="i"><use href="#i-vol"/></svg></button>
         <button id="sf-img" aria-label="Add background picture" title="Add background picture"><svg class="i"><use href="#i-image"/></svg></button>
         <button id="sf-eye" aria-label="Show or hide onion skin" title="Show or hide onion skin"><svg class="i"><use href="#i-eye"/></svg></button>
       </div>
       <div class="stagebtns" id="stagebtns">
+        <div class="stagebtns-grip" id="stagebtnsGrip" role="button" aria-label="Drag to move the zoom controls" title="Drag to move"></div>
         <button class="iconbtn" id="zcollapse" aria-label="Collapse zoom controls" aria-expanded="true"><span class="chev"></span></button>
         <button class="iconbtn" id="zin" aria-label="Zoom in"><svg class="i"><use href="#i-plus"/></svg></button>
         <output class="zpct" id="zpct">100%</output>
@@ -652,6 +666,7 @@ body{font-size:14px;letter-spacing:0}
       <label class="fpsbox"><svg class="i" style="width:16px;height:16px"><use href="#i-clock"/></svg><input type="range" id="fps" min="1" max="60" value="12" aria-label="Frames per second"><output id="fpsVal">12 fps</output></label>
       <span class="sep" style="width:1px;height:24px;background:var(--line);margin:0 6px;flex:none"></span>
       <button class="iconbtn" id="t-add" aria-label="Add blank frame"><svg class="i"><use href="#i-plus"/></svg><span class="ctl-label">Add frame</span></button>
+      <button class="iconbtn" id="t-key" aria-label="Mark frame as keyframe" aria-pressed="false" title="Mark this frame as a keyframe"><svg class="i"><use href="#i-key"/></svg><span class="ctl-label">Keyframe</span></button>
       <button class="iconbtn" id="t-dup" aria-label="Duplicate frame"><svg class="i"><use href="#i-copy"/></svg><span class="ctl-label">Duplicate</span></button>
       <button class="iconbtn" id="t-del" aria-label="Delete frame"><svg class="i"><use href="#i-trash"/></svg><span class="ctl-label">Delete</span></button>
       <button class="iconbtn" id="t-more" aria-label="More frame actions"><svg class="i"><use href="#i-more"/></svg><span class="ctl-label">More</span></button>
@@ -700,7 +715,7 @@ const G={guide:null,lessons:[]};      // lesson hooks filled in later
 
 /* ===== state ===== */
 const S={proj:null,fi:0,li:0,tool:'pencil',brush:'pencil',color:'#1d2230',size:6,opac:100,stab:20,stabMode:'balanced',sym:'off',
-  onion:{on:true,b:1,a:1,o:40,fade:.72,activeLayerOnly:false,prevColor:'#ff4d4d',nextColor:'#35c46a'},grid:false,guides:true,gap:2,fillSrc:'all',shapeFill:0,
+  onion:{on:true,b:1,a:1,o:40,fade:.72,activeLayerOnly:false,prevColor:'#ff4d4d',nextColor:'#35c46a',showKey:'nearest',keyColor:'#ffb020'},grid:false,guides:true,gap:2,fillSrc:'all',shapeFill:0,
   playing:false,undo:[],redo:[],zoom:1,tx:0,ty:0,penSeen:false,clip:null,recent:lsGet('fb.recent',[]),
   dirtyCels:new Set(),dirtyDoc:false,stroke:null,sel:null,view:'home'};
 let saveHook=()=>{};
@@ -922,21 +937,29 @@ function tinted(ctx,fi,color,alpha,onlyLayerId=null,hiResVectors=false){
   ctx.save();ctx.globalAlpha=alpha;ctx.drawImage(t,0,0);ctx.restore();}
 let paperTile=null;
 function paintTransparentPaper(ctx,p){if(!paperTile){paperTile=mk(24,24);const t=paperTile.getContext('2d');t.fillStyle='#f3f4f7';t.fillRect(0,0,24,24);t.fillStyle='#d8dbe2';t.fillRect(0,0,12,12);t.fillRect(12,12,12,12);}ctx.fillStyle=ctx.createPattern(paperTile,'repeat');ctx.fillRect(0,0,p.w,p.h);}
+function nearestKeyframes(p,fi){let bd=Infinity,best=[];for(let i=0;i<p.frames.length;i++){if(p.frames[i].poseMarker==='key'&&i!==fi){const d=Math.abs(i-fi);if(d<bd){bd=d;best=[i];}else if(d===bd)best.push(i);}}return best;}
+function allKeyframes(p,fi){const out=[];for(let i=0;i<p.frames.length;i++)if(p.frames[i].poseMarker==='key'&&i!==fi)out.push(i);return out;}
 function onionLoops(ctx,fi,hi){const p=S.proj,n=S.onion,onlyLayerId=n.activeLayerOnly&&p.layers[S.li]?p.layers[S.li].id:null;
   for(let k=n.b;k>=1;k--){const j=fi-k;if(j>=0)tinted(ctx,j,n.prevColor||'#ff4d4d',n.o/100*Math.pow(n.fade==null?.72:n.fade,k-1),onlyLayerId,hi);}
-  for(let k=n.a;k>=1;k--){const j=fi+k;if(j<p.frames.length)tinted(ctx,j,n.nextColor||'#35c46a',n.o/100*Math.pow(n.fade==null?.72:n.fade,k-1),onlyLayerId,hi);}}
+  for(let k=n.a;k>=1;k--){const j=fi+k;if(j<p.frames.length)tinted(ctx,j,n.nextColor||'#35c46a',n.o/100*Math.pow(n.fade==null?.72:n.fade,k-1),onlyLayerId,hi);}
+  if(n.showKey==='nearest'||n.showKey==='all'){
+    // Keyframe(s) stay visible as a reference regardless of the before/after range above.
+    // 'nearest': the closest keyframe(s) to this frame — if two are equally close (one
+    // before, one after), both are shown. 'all': every keyframe in the project. Either
+    // way, skip any that are already covered by the range so they don't double-draw.
+    const kfs=n.showKey==='all'?allKeyframes(p,fi):nearestKeyframes(p,fi);
+    for(const kf of kfs){if(kf<fi-n.b||kf>fi+n.a)tinted(ctx,kf,n.keyColor||'#ffb020',n.o/100,onlyLayerId,hi);}
+  }}
 /* Onion frames can't change mid-stroke, so tint them once per stroke instead of on every animation frame. */
 function onionCached(ctx,fi){const p=S.proj,n=S.onion,xf=ctx.getTransform(),W=ctx.canvas.width,H=ctx.canvas.height,
-  key=[W,H,xf.a,xf.b,xf.c,xf.d,xf.e,xf.f,fi,S.li,p.frames.length,p.frames.slice(Math.max(0,fi-n.b),fi+n.a+1).map(q=>q.id).join(','),p.layers.map(l=>l.id+':'+(l.vis?1:0)+':'+l.op+':'+(l.blend||'')).join(','),n.b,n.a,n.o,n.fade,n.prevColor,n.nextColor,n.activeLayerOnly].join('|');
+  key=[W,H,xf.a,xf.b,xf.c,xf.d,xf.e,xf.f,fi,S.li,p.frames.length,p.frames.slice(Math.max(0,fi-n.b),fi+n.a+1).map(q=>q.id).join(','),p.layers.map(l=>l.id+':'+(l.vis?1:0)+':'+l.op+':'+(l.blend||'')).join(','),n.b,n.a,n.o,n.fade,n.prevColor,n.nextColor,n.activeLayerOnly,n.showKey,n.keyColor,p.frames.map((q,i)=>q.poseMarker==='key'?i:'').join(',')].join('|');
   if(!onionCache||onionCache.key!==key){const c=mk(W,H),cc=c.getContext('2d',{alpha:true,desynchronized:true});cc.setTransform(xf.a,xf.b,xf.c,xf.d,xf.e,xf.f);onionLoops(cc,fi,true);onionCache={key,c};}
   ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(onionCache.c,0,0);ctx.restore();}
 function composite(ctx,fi,o={}){const p=S.proj;ctx.clearRect(0,0,p.w,p.h);
   if(!o.noPaper){if(p.paper==='transparent'&&!o.forcePaper)paintTransparentPaper(ctx,p);else{ctx.fillStyle=p.paper==='transparent'?'#fff':p.paper;ctx.fillRect(0,0,p.w,p.h);}}
   if(o.bg!==false)drawBg(ctx,bgFor(fi),p.w,p.h,o);
   if(o.onion&&S.onion.on&&o.live&&o.hiResVectors){onionCached(ctx,fi);}
-  else if(o.onion&&S.onion.on){const n=S.onion,onlyLayerId=n.activeLayerOnly&&p.layers[S.li]?p.layers[S.li].id:null;
-    for(let k=n.b;k>=1;k--){const j=fi-k;if(j>=0)tinted(ctx,j,n.prevColor||'#ff4d4d',n.o/100*Math.pow(n.fade==null?.72:n.fade,k-1),onlyLayerId,!!o.hiResVectors);}
-    for(let k=n.a;k>=1;k--){const j=fi+k;if(j<p.frames.length)tinted(ctx,j,n.nextColor||'#35c46a',n.o/100*Math.pow(n.fade==null?.72:n.fade,k-1),onlyLayerId,!!o.hiResVectors);}}
+  else if(o.onion&&S.onion.on){onionLoops(ctx,fi,!!o.hiResVectors);}
   drawLayers(ctx,fi,o);
   if(o.guides&&p.lesson&&S.guides&&G.guide){ctx.save();G.guide(ctx,fi,p.frames.length,p.w,p.h);ctx.restore();}
   if(o.grid&&S.grid){ctx.save();ctx.strokeStyle='rgba(60,90,160,.28)';ctx.lineWidth=1;ctx.beginPath();const g=(p.grid||48)*(p.q||1);
@@ -1573,6 +1596,7 @@ function initStage(){const st=$('#stage');
     if(e.ctrlKey||e.metaKey||Math.abs(e.deltaY)>0&&!e.shiftKey){const k=Math.exp(-e.deltaY*(e.ctrlKey?.01:.0015)),z=clamp(S.zoom*k,.1,16),cx=(mx-S.tx)/S.zoom,cy=(my-S.ty)/S.zoom;S.zoom=z;S.tx=mx-cx*z;S.ty=my-cy*z;}
     else{S.tx-=e.deltaX;S.ty-=e.deltaY;}viewMoved();},{passive:false});
   $('#stagewrap').addEventListener('pointerdown',e=>{if(e.target.closest&&e.target.closest('#rail'))return;closeOpts();},true);const zb=$('#stagebtns'),setZC=c=>{zb.classList.toggle('collapsed',c);$('#zcollapse').setAttribute('aria-expanded',String(!c));$('#zcollapse').setAttribute('aria-label',c?'Expand zoom controls':'Collapse zoom controls');lsSet('fb.zoomCollapsed',c);};setZC(!!lsGet('fb.zoomCollapsed',false));$('#zcollapse').onclick=()=>setZC(!zb.classList.contains('collapsed'));
+  initStagebtnsDrag(zb);
   $('#zout').onclick=()=>zoomBy(1/1.25);$('#zhand').onclick=()=>{S.hand=!S.hand;$('#zhand').setAttribute('aria-pressed',String(S.hand));$('#zhand').classList.toggle('on',S.hand);$('#stagewrap').style.cursor=S.hand?'grab':'';};$('#zin').onclick=()=>zoomBy(1.25);$('#zfit').onclick=()=>{fitView();needsRender();};
   window.addEventListener('resize',()=>{if(S.view==='editor'){sizeCanvases();fitView();needsRender();}});
   document.addEventListener('keydown',e=>{if(S.view!=='editor')return;const t=e.target.tagName;if(t==='INPUT'||t==='SELECT'||t==='TEXTAREA')return;const k=e.key.toLowerCase();
@@ -1689,20 +1713,22 @@ function initOptbar(){const bind=(id,fn)=>$(id).addEventListener('input',e=>fn(+
   $$('#fillsrc button').forEach(b=>b.onclick=()=>{S.fillSrc=b.dataset.src;$$('#fillsrc button').forEach(x=>x.setAttribute('aria-pressed',x===b));});
   $$('#shapefill button').forEach(b=>b.onclick=()=>{S.shapeFill=+b.dataset.sf;$$('#shapefill button').forEach(x=>x.setAttribute('aria-pressed',x===b));});
   $('#ed-undo').onclick=undo;$('#ed-redo').onclick=redo;
-  const saveOnionPrefs=()=>lsSet('fb.onionPrefs',{on:S.onion.on,b:S.onion.b,a:S.onion.a,o:S.onion.o,fade:S.onion.fade,activeLayerOnly:S.onion.activeLayerOnly,prevColor:S.onion.prevColor,nextColor:S.onion.nextColor});
+  const saveOnionPrefs=()=>lsSet('fb.onionPrefs',{on:S.onion.on,b:S.onion.b,a:S.onion.a,o:S.onion.o,fade:S.onion.fade,activeLayerOnly:S.onion.activeLayerOnly,prevColor:S.onion.prevColor,nextColor:S.onion.nextColor,showKey:S.onion.showKey,keyColor:S.onion.keyColor});
   const onionColorPresets=()=>lsGet('fb.onionColorPairs',[]);
   const refreshOnionColorPresets=()=>{const sel=$('#on-color-presets'),arr=onionColorPresets(),keep=sel.value;sel.innerHTML='<option value="">Saved pairs…</option>'+arr.map((p,i)=>`<option value="${i}">${p.prevColor} / ${p.nextColor}</option>`).join('');if(arr[keep])sel.value=keep;};
   $('#on-save-colors').onclick=()=>{const arr=onionColorPresets();arr.push({prevColor:S.onion.prevColor||'#ff4d4d',nextColor:S.onion.nextColor||'#35c46a'});lsSet('fb.onionColorPairs',arr.slice(-16));refreshOnionColorPresets();$('#on-color-presets').value=String(Math.min(arr.length,16)-1);toast('Onion colour pair saved');};
   $('#on-color-presets').onchange=e=>{const p=onionColorPresets()[+e.target.value];if(!p)return;S.onion.prevColor=p.prevColor;S.onion.nextColor=p.nextColor;$('#on-prev-color').value=p.prevColor;$('#on-next-color').value=p.nextColor;saveOnionPrefs();needsRender();};
   $('#on-color-presets').oncontextmenu=e=>{e.preventDefault();const sel=e.currentTarget,i=+sel.value;if(sel.value===''||!Number.isInteger(i))return;const arr=onionColorPresets();arr.splice(i,1);lsSet('fb.onionColorPairs',arr);refreshOnionColorPresets();toast('Saved onion colour pair removed');};
   refreshOnionColorPresets();
-  const syncOnionControls=()=>{[['#on-b','b'],['#on-a','a'],['#on-o','o']].forEach(([id,k])=>{$(id).value=S.onion[k];const nn=$(id+'-n');if(nn)nn.value=S.onion[k];});$('#on-fade').value=Math.round((S.onion.fade==null?.72:S.onion.fade)*100);$('#on-fade-val').textContent=$('#on-fade').value+'% remaining per frame';$('#on-active-layer').checked=!!S.onion.activeLayerOnly;$('#on-prev-color').value=S.onion.prevColor||'#ff4d4d';$('#on-next-color').value=S.onion.nextColor||'#35c46a';$('#ed-onion').setAttribute('aria-pressed',String(!!S.onion.on));};
+  const syncOnionControls=()=>{[['#on-b','b'],['#on-a','a'],['#on-o','o']].forEach(([id,k])=>{$(id).value=S.onion[k];const nn=$(id+'-n');if(nn)nn.value=S.onion[k];});$('#on-fade').value=Math.round((S.onion.fade==null?.72:S.onion.fade)*100);$('#on-fade-val').textContent=$('#on-fade').value+'% remaining per frame';$('#on-active-layer').checked=!!S.onion.activeLayerOnly;$$('#on-key-mode button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.km===S.onion.showKey)));$('#on-key-color').value=S.onion.keyColor||'#ffb020';$('#on-prev-color').value=S.onion.prevColor||'#ff4d4d';$('#on-next-color').value=S.onion.nextColor||'#35c46a';$('#ed-onion').setAttribute('aria-pressed',String(!!S.onion.on));};
   syncOnionControls();
   const tg=(id,fn)=>$(id).onclick=e=>{const b=e.currentTarget,on=b.getAttribute('aria-pressed')!=='true';b.setAttribute('aria-pressed',on);fn(on);needsRender();};
   tg('#ed-onion',on=>{S.onion.on=on;saveOnionPrefs();});tg('#ed-grid',on=>S.grid=on);
   const ob=(id,k)=>$(id).addEventListener('input',e=>{S.onion[k]=+e.target.value;saveOnionPrefs();needsRender();});ob('#on-b','b');ob('#on-a','a');ob('#on-o','o');
   $('#on-fade').addEventListener('input',e=>{S.onion.fade=+e.target.value/100;$('#on-fade-val').textContent=e.target.value+'% remaining per frame';saveOnionPrefs();needsRender();});
   $('#on-active-layer').addEventListener('change',e=>{S.onion.activeLayerOnly=e.target.checked;saveOnionPrefs();needsRender();});
+  $$('#on-key-mode button').forEach(b=>b.onclick=()=>{S.onion.showKey=b.dataset.km;$$('#on-key-mode button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));saveOnionPrefs();needsRender();});
+  $('#on-key-color').addEventListener('input',e=>{S.onion.keyColor=e.target.value;saveOnionPrefs();needsRender();});
   $('#on-prev-color').addEventListener('input',e=>{S.onion.prevColor=e.target.value;saveOnionPrefs();needsRender();});
   $('#on-next-color').addEventListener('input',e=>{S.onion.nextColor=e.target.value;saveOnionPrefs();needsRender();});
   $('#ed-side').onclick=()=>$('#side').classList.toggle('open');
@@ -1724,7 +1750,48 @@ function buildStrip(){onionCache=null;const st=$('#strip'),p=S.proj;st.innerHTML
   const a=document.createElement('div');a.className='fr add';a.innerHTML=`<div class="t">${ic('plus')}</div>`;a.setAttribute('role','button');a.setAttribute('aria-label','Add frame');a.onclick=()=>addFrame(S.proj.frames.length);st.appendChild(a);
   thumbAll();}
 function refreshHold(){if(!S.proj||!F())return;const h=F().hold||1,sl=$('#holdsl');if(!sl)return;sl.value=h;const ms=Math.round(h*1000/Math.max(1,S.proj.fps));$('#holdval').textContent=(h>1?'\u00d7'+h+' \u00b7 ':'')+ms+'ms';}
-function markSel(){refreshHold();$$('#strip .fr').forEach((e,i)=>{e.classList.toggle('sel',i===(S.playing?S.playFi:S.fi));e.classList.toggle('multiSel',selectedFrames.has(i));});const e=$('#strip').children[S.playing?S.playFi:S.fi];if(e){const s=$('#strip'),l=e.offsetLeft-s.offsetLeft;if(l<s.scrollLeft||l+e.offsetWidth>s.scrollLeft+s.clientWidth)s.scrollTo({left:l-s.clientWidth/2+e.offsetWidth/2,behavior:S.playing?'auto':'smooth'});}}
+function initStagebtnsDrag(zb){
+  const grip=$('#stagebtnsGrip',zb),wrap=$('#stagewrap');
+  if(!grip||!wrap)return;
+  const clampAndPlace=(leftFrac,topFrac)=>{
+    const wr=wrap.getBoundingClientRect(),er=zb.getBoundingClientRect();
+    const maxL=Math.max(0,wr.width-er.width),maxT=Math.max(0,wr.height-er.height);
+    const left=clamp(leftFrac*wr.width,0,maxL),top=clamp(topFrac*wr.height,0,maxT);
+    zb.style.left=left+'px';zb.style.top=top+'px';zb.style.right='auto';zb.style.bottom='auto';
+    return{left,top,wr};
+  };
+  const saved=lsGet('fb.stagebtnsPos',null);
+  if(saved&&typeof saved.lf==='number'&&typeof saved.tf==='number')clampAndPlace(saved.lf,saved.tf);
+  let drag=null;
+  grip.addEventListener('pointerdown',e=>{
+    const er=zb.getBoundingClientRect();
+    drag={id:e.pointerId,ox:e.clientX-er.left,oy:e.clientY-er.top};
+    zb.classList.add('dragging');
+    grip.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  grip.addEventListener('pointermove',e=>{
+    if(!drag||e.pointerId!==drag.id)return;
+    const wr=wrap.getBoundingClientRect();
+    const{left,top}=clampAndPlace((e.clientX-wr.left-drag.ox)/wr.width,(e.clientY-wr.top-drag.oy)/wr.height);
+    drag.lf=left/wr.width;drag.tf=top/wr.height;
+  });
+  const endDrag=e=>{
+    if(!drag||(e&&e.pointerId!==drag.id))return;
+    zb.classList.remove('dragging');
+    if(typeof drag.lf==='number')lsSet('fb.stagebtnsPos',{lf:drag.lf,tf:drag.tf});
+    drag=null;
+  };
+  grip.addEventListener('pointerup',endDrag);
+  grip.addEventListener('pointercancel',endDrag);
+  window.addEventListener('resize',()=>{
+    const pos=lsGet('fb.stagebtnsPos',null);
+    if(pos&&typeof pos.lf==='number')clampAndPlace(pos.lf,pos.tf);
+  });
+}
+function markSel(){refreshHold();$$('#strip .fr').forEach((e,i)=>{e.classList.toggle('sel',i===(S.playing?S.playFi:S.fi));e.classList.toggle('multiSel',selectedFrames.has(i));});const e=$('#strip').children[S.playing?S.playFi:S.fi];if(e){const s=$('#strip'),l=e.offsetLeft-s.offsetLeft;if(l<s.scrollLeft||l+e.offsetWidth>s.scrollLeft+s.clientWidth)s.scrollTo({left:l-s.clientWidth/2+e.offsetWidth/2,behavior:S.playing?'auto':'smooth'});}refreshKeyBtn();}
+function refreshKeyBtn(){if(!S.proj)return;const on=F()&&F().poseMarker==='key';$$('#sf-key,#t-key').forEach(b=>b.setAttribute('aria-pressed',String(on)));}
+function toggleKeyframe(){if(!S.proj)return;const f=F(),was=f.poseMarker;f.poseMarker=was==='key'?'':'key';markDoc();buildStrip();markSel();toast(f.poseMarker?'Marked as keyframe':'Keyframe cleared');}
 function gotoFrame(i){dbg('goto',String(i));onionCache=null;if(S.playing)stopPlay();i=clamp(i,0,S.proj.frames.length-1);commitFloat();S.fi=i;markSel();refreshBgHint();syncLayerOp();refreshRotoPanel();needsRender();}
 function addFrame(at,src){const p=S.proj,nf=newFrame();dbg('addFrame','at='+at+(src?' dup':''));if(src){nf.hold=src.hold;nf.note=src.note||'';nf.poseMarker=src.poseMarker||'';for(const k in src.cels)nf.cels[k]=snapCel(src.cels[k]);nf.vectors=cloneVectors(src.vectors);nf.links={...(src.links||{})};nf.bg=src.bg?{...src.bg,bmp:null,loading:false}:null;}
   p.frames.splice(at,0,nf);const prev=S.fi;S.fi=at;Object.keys(nf.cels).forEach(k=>S.dirtyCels.add(nf.id+'|'+k));
@@ -1874,7 +1941,7 @@ function stopPlay(){if(!S.playing)return;S.playing=false;cancelAnimationFrame(pl
 function initTransport(){$('#holdsl').oninput=e=>{if(S.proj)setHold(+e.target.value-F().hold);};$('#t-play').onclick=togglePlay;$('#t-prev').onclick=()=>gotoFrame(S.fi-1);$('#t-next').onclick=()=>gotoFrame(S.fi+1);
   $('#t-mode').onclick=()=>{const p=S.proj,i=(MODES.findIndex(m=>m[0]===p.mode)+1)%MODES.length;p.mode=MODES[i][0];refreshMode();toast('Playback: '+MODES[i][1]);markDoc();};
   $('#fps').oninput=e=>{S.proj.fps=+e.target.value;$('#fpsVal').textContent=e.target.value+' fps';markDoc();refreshHold();};
-  $('#t-add').onclick=()=>addFrame(S.fi+1);$('#t-dup').onclick=()=>addFrame(S.fi+1,F());$('#t-del').onclick=delFrame;$('#t-tween').onclick=openTween;$('#t-more').onclick=e=>openFrameMenu(e.currentTarget);$('#t-range').onclick=playbackRangeDialog;$('#t-compare').onclick=compareFramesDialog;$('#t-multi').onclick=multiFrameDialog;$('#t-plan').onclick=animationPlanDialog;$('#t-perspective').onclick=perspectiveDialog;$('#t-motion').onclick=motionPathDialog;$('#t-seq').onclick=()=>$('#fileSequence').click();$('#fileSequence').onchange=e=>{const files=[...e.target.files||[]];e.target.value='';if(files.length)importImageSequence(files);};}
+  $('#t-add').onclick=()=>addFrame(S.fi+1);$('#t-key').onclick=toggleKeyframe;$('#t-dup').onclick=()=>addFrame(S.fi+1,F());$('#t-del').onclick=delFrame;$('#t-tween').onclick=openTween;$('#t-more').onclick=e=>openFrameMenu(e.currentTarget);$('#t-range').onclick=playbackRangeDialog;$('#t-compare').onclick=compareFramesDialog;$('#t-multi').onclick=multiFrameDialog;$('#t-plan').onclick=animationPlanDialog;$('#t-perspective').onclick=perspectiveDialog;$('#t-motion').onclick=motionPathDialog;$('#t-seq').onclick=()=>$('#fileSequence').click();$('#fileSequence').onchange=e=>{const files=[...e.target.files||[]];e.target.value='';if(files.length)importImageSequence(files);};}
 function refreshMode(){const m=MODES.find(x=>x[0]===S.proj.mode)||MODES[0];$('#t-mode').innerHTML=ic(m[2]);$('#t-mode').setAttribute('aria-label','Playback mode: '+m[1]);$('#t-mode').title=m[1];}
 
 /* ===== auto in-betweens: moves + resizes each layer's drawing between two keyframes, then blends ===== */
@@ -2248,6 +2315,7 @@ function initFloatUI(){
     grip.addEventListener('pointercancel',e=>{if(!d||e.pointerId!==d.id)return;fw=d.was;d=null;apply();});}
   /* add-frame button on the canvas */
   const sa=$('#sf-add');if(sa)sa.onclick=()=>$('#t-add').click();
+  const sk=$('#sf-key');if(sk)sk.onclick=toggleKeyframe;
   /* onion skin card: long-press (or right-click) the onion icon */
   const pop=$('#onionpop'),ob=$('#ed-onion');
   if(pop&&ob){const show=on=>{pop.hidden=!on;};
@@ -2280,7 +2348,7 @@ function openProject(p,isNew){p.audioTracks=(p.audioTracks&&p.audioTracks.length
   requestAnimationFrame(()=>{fitView();markSel();renderReferences();needsRender();});}
 async function goHome(){stopPlay();commitFloat();clearTimeout(saveT);await saveNow();lsSet('fb.lastSession',null);S.view='home';S.proj=null;stopAudio();$('#editor').hidden=true;$('#home').hidden=false;await renderHome();}
 async function offerSessionRecovery(){const id=lsGet('fb.lastSession',null);if(!id)return;let d=null;try{d=await dbGet('projects',id);}catch(e){return;}if(!d){lsSet('fb.lastSession',null);return;}const m=modal(`<h3>Resume your last session?</h3><p class="hint">Flipbook Studio found your last open project, <b>${esc(d.name||'Untitled animation')}</b>. Its most recently autosaved version is available on this device.</p><div class="row sp"><button class="btn" id="recovery-dismiss">Stay on home</button><button class="btn pri" id="recovery-open">Resume project</button></div>`);$('#recovery-dismiss',m.el).onclick=()=>{lsSet('fb.lastSession',null);m.close();};$('#recovery-open',m.el).onclick=()=>{m.close();openById(id);};}
-async function boot(){initPalette();S.penOnly=lsGet('fb.penonly',false);const onionPrefs=lsGet('fb.onionPrefs',null);const onionDefV=lsGet('fb.onionDefaultsV',0);if(onionPrefs)Object.keys(S.onion).forEach(k=>{if(onionDefV<2&&(k==='b'||k==='a'))return;if(Object.prototype.hasOwnProperty.call(onionPrefs,k))S.onion[k]=onionPrefs[k];});if(onionDefV<2)lsSet('fb.onionDefaultsV',2);
+async function boot(){initPalette();S.penOnly=lsGet('fb.penonly',false);const onionPrefs=lsGet('fb.onionPrefs',null);const onionDefV=lsGet('fb.onionDefaultsV',0);if(onionPrefs)Object.keys(S.onion).forEach(k=>{if(onionDefV<2&&(k==='b'||k==='a'))return;if(Object.prototype.hasOwnProperty.call(onionPrefs,k))S.onion[k]=onionPrefs[k];});if(typeof S.onion.showKey==='boolean')S.onion.showKey=S.onion.showKey?'nearest':'off';if(onionDefV<2)lsSet('fb.onionDefaultsV',2);
   S.brush='pencil';S.tool='brush';S.size=brushSize.pencil;initStage();initOptbar();initScrub();initLayers();initTransport();initAudio();initBg();initReferences();initRoto();initExtras();initFloatUI();initFrameDrag();
   $('#ed-back').onclick=goHome;$('#ed-export').onclick=openExport;$('#ed-settings').onclick=settingsDialog;$('#ed-name').onclick=settingsDialog;$('#ed-tools-menu').onclick=e=>{const actions=[['Grid on/off','ed-grid'],['Fullscreen','ed-full'],['Settings','ed-settings'],['Auto in-betweens','t-tween'],['Playback & export range','t-range'],['Compare frames','t-compare'],['Multi-frame editing','t-multi'],['Animation plan','t-plan'],['Perspective guides','t-perspective'],['Motion path guide','t-motion'],['Import image sequence','t-seq']];const menu=document.createElement('div');menu.className='menu';menu.id='toolsMenu';actions.forEach(([label,id])=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=()=>{pop.close();$('#'+id).click();};menu.appendChild(b);});const pop=popover(e.currentTarget,menu);};
   $('#hm-new').onclick=newDialog;$('#hm-import').onclick=()=>$('#fileProject').click();$('#fileProject').onchange=e=>{const f=e.target.files[0];e.target.value='';if(f)importBackup(f);};
