@@ -433,6 +433,20 @@ body{font-size:14px;letter-spacing:0}
 .stagefloat #sf-key:hover{background:#000;filter:brightness(1.3)}
 .stagefloat #sf-key[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .stagefloat #sf-key[aria-pressed="true"]:hover{filter:brightness(1.08)}
+.stagefloat #sf-keymode{position:relative;overflow:visible}
+.kmode-ring{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;transform:rotate(-90deg);overflow:visible}
+.kmode-ring-bg{fill:none;stroke:color-mix(in srgb,currentColor 16%,transparent);stroke-width:3}
+.kmode-ring-fg{fill:none;stroke:var(--accent);stroke-width:3;stroke-linecap:round;stroke-dasharray:138.2;stroke-dashoffset:138.2;transition:stroke-dashoffset .28s cubic-bezier(.4,0,.2,1),stroke .2s}
+.kmode-label{position:absolute;left:50%;bottom:-9px;transform:translateX(-50%);font-size:9px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;padding:2px 7px;border-radius:99px;background:var(--surface2);color:var(--mut);box-shadow:0 2px 6px var(--shadow);white-space:nowrap;transition:background .2s,color .2s}
+#sf-keymode[data-kmode="off"]{color:var(--mut)}
+#sf-keymode[data-kmode="off"] .kmode-ring-fg{stroke-dashoffset:138.2}
+#sf-keymode[data-kmode="nearest"]{color:var(--fg)}
+#sf-keymode[data-kmode="nearest"] .kmode-ring-fg{stroke-dashoffset:69.1}
+#sf-keymode[data-kmode="nearest"] .kmode-label{background:color-mix(in srgb,var(--accent) 20%,var(--surface2));color:var(--fg)}
+#sf-keymode[data-kmode="all"]{color:var(--accent)}
+#sf-keymode[data-kmode="all"] .kmode-ring-fg{stroke-dashoffset:0}
+#sf-keymode[data-kmode="all"] .kmode-label{background:var(--accent);color:var(--accent-ink)}
+.onionpop.keyonionpop{top:auto;bottom:70px;right:auto;left:12px}
 .onionpop{position:absolute;z-index:7;top:60px;right:12px;width:min(320px,calc(100% - 24px));max-height:calc(100% - 140px);overflow-y:auto;border-radius:18px;box-shadow:0 12px 36px var(--shadow)}
 .onionpop[hidden]{display:none}
 .rngnum{display:flex;align-items:center;gap:10px}
@@ -590,14 +604,30 @@ body{font-size:14px;letter-spacing:0}
       <label class="fld">Strength <input type="range" id="on-o" min="10" max="80" value="40"></label>
       <label class="fld">Fade per step <input type="range" id="on-fade" min="30" max="95" value="72"><span class="hint" id="on-fade-val">72% remaining per frame</span></label>
       <label class="row" style="gap:8px;align-items:center"><input type="checkbox" id="on-active-layer"> Active layer only</label>
-      <div class="fld"><span>Keyframe onion skin</span><div class="seg" id="on-key-mode" role="group" aria-label="Keyframe onion skin"><button data-km="off">Off</button><button data-km="nearest" aria-pressed="true">Nearest</button><button data-km="all">All</button></div></div>
-      <label class="fld">Keyframe colour <input type="color" id="on-key-color" value="#ffb020"></label>
+      <label class="row" style="gap:8px;align-items:center"><input type="checkbox" id="on-original-colors"> Original colours (no tint)</label>
+      <p class="hint">Keyframe onion skin (showing nearest/all marked keyframes, its own colour and opacity) now has its own settings — tap the key icon beside the onion icon on the canvas, or long-press it.</p>
       <label class="fld">Previous-frame colour <input type="color" id="on-prev-color" value="#ff4d4d"></label>
       <label class="fld">Next-frame colour <input type="color" id="on-next-color" value="#35c46a"></label>
       <div class="row"><button class="btn sm" id="on-save-colors">Save colour pair</button><select id="on-color-presets" aria-label="Saved onion colour pairs" style="min-width:0;flex:1"><option value="">Saved pairs…</option></select></div>
       <label class="row" style="gap:8px;align-items:center"><input type="checkbox" id="on-selfcheck" checked> Self-check ghosts (auto-repair)</label>
       <div class="row"><button class="btn sm" id="on-copylog" type="button">Copy bug log</button></div>
       <p class="hint">Layer-only mode shows onion skins from the currently selected layer. Colours affect the tinted onion overlays only. Save colour pairs for quick reuse.</p>
+    </div>
+  </div>
+  <div class="onionpop keyonionpop" id="keyonionpop" hidden role="dialog" aria-label="Keyframe onion skin settings">
+    <div class="panel"><h4>Keyframe onion skin <span class="seg" style="padding:3px"><button class="iconbtn" id="keyonion-close" type="button" aria-label="Close keyframe onion skin settings" style="width:38px;height:38px;font-size:20px;font-weight:700">×</button></span></h4>
+      <div class="fld"><span>Mode</span><div class="seg" id="ko-mode" role="group" aria-label="Keyframe onion skin mode"><button data-km="off">Off</button><button data-km="nearest" aria-pressed="true">Nearest</button><button data-km="all">All</button></div></div>
+      <label class="fld">Keyframe colour <input type="color" id="ko-color" value="#ffb020"></label>
+      <div class="row"><button class="btn sm" id="ko-save-color">Save colour</button><select id="ko-color-presets" aria-label="Saved keyframe colours" style="min-width:0;flex:1"><option value="">Saved colours…</option></select></div>
+      <label class="fld">Keyframe opacity <input type="range" id="ko-opacity" min="10" max="100" value="60"></label>
+      <div class="fld"><span>Include in keyframe onion skin</span><div id="ko-types" style="display:flex;flex-direction:column;gap:6px">
+        <label class="row" style="gap:8px;align-items:center"><input type="checkbox" id="ko-type-key" checked> Key pose</label>
+        <label class="row" style="gap:8px;align-items:center"><input type="checkbox" id="ko-type-breakdown"> Breakdown</label>
+        <label class="row" style="gap:8px;align-items:center"><input type="checkbox" id="ko-type-contact"> Contact</label>
+        <label class="row" style="gap:8px;align-items:center"><input type="checkbox" id="ko-type-anticipation"> Anticipation</label>
+        <label class="row" style="gap:8px;align-items:center"><input type="checkbox" id="ko-type-extreme"> Extreme</label>
+      </div></div>
+      <p class="hint">Keyframes stay visible as onion-skin references regardless of the before/after range, using this colour and opacity. "Nearest" shows the closest keyframe(s) to the current frame (both, if tied); "All" shows every keyframe in the project. Only the pose-marker types checked above count as keyframes here — mark frames via the key button on the canvas (Key pose) or a frame's "More → Pose marker" menu (the others).</p>
     </div>
   </div>
   <div class="work">
@@ -610,6 +640,11 @@ body{font-size:14px;letter-spacing:0}
         <button id="sf-audio" aria-label="Import sound" title="Import sound"><svg class="i"><use href="#i-vol"/></svg></button>
         <button id="sf-img" aria-label="Add background picture" title="Add background picture"><svg class="i"><use href="#i-image"/></svg></button>
         <button id="sf-eye" aria-label="Show or hide onion skin" title="Show or hide onion skin"><svg class="i"><use href="#i-eye"/></svg></button>
+        <button id="sf-keymode" data-kmode="nearest" aria-label="Keyframe onion skin: tap to cycle Off, Nearest, All. Long-press for settings." title="Keyframe onion skin — tap to cycle, long-press for settings">
+          <svg class="kmode-ring" viewBox="0 0 52 52" aria-hidden="true"><circle class="kmode-ring-bg" cx="26" cy="26" r="22"/><circle class="kmode-ring-fg" cx="26" cy="26" r="22"/></svg>
+          <svg class="i"><use href="#i-key"/></svg>
+          <span class="kmode-label" aria-hidden="true">Nearest</span>
+        </button>
       </div>
       <div class="stagebtns" id="stagebtns">
         <div class="stagebtns-grip" id="stagebtnsGrip" role="button" aria-label="Drag to move the zoom controls" title="Drag to move"></div>
@@ -715,7 +750,7 @@ const G={guide:null,lessons:[]};      // lesson hooks filled in later
 
 /* ===== state ===== */
 const S={proj:null,fi:0,li:0,tool:'pencil',brush:'pencil',color:'#1d2230',size:6,opac:100,stab:20,stabMode:'balanced',sym:'off',
-  onion:{on:true,b:1,a:1,o:40,fade:.72,activeLayerOnly:false,prevColor:'#ff4d4d',nextColor:'#35c46a',showKey:'nearest',keyColor:'#ffb020'},grid:false,guides:true,gap:2,fillSrc:'all',shapeFill:0,
+  onion:{on:true,b:1,a:1,o:40,fade:.72,activeLayerOnly:false,prevColor:'#ff4d4d',nextColor:'#35c46a',showKey:'nearest',keyColor:'#ffb020',keyOpacity:60,originalColors:false,keyTypes:{key:true,breakdown:false,contact:false,anticipation:false,extreme:false}},grid:false,guides:true,gap:2,fillSrc:'all',shapeFill:0,
   playing:false,undo:[],redo:[],zoom:1,tx:0,ty:0,penSeen:false,clip:null,recent:lsGet('fb.recent',[]),
   dirtyCels:new Set(),dirtyDoc:false,stroke:null,sel:null,view:'home'};
 let saveHook=()=>{};
@@ -912,7 +947,7 @@ function drawLayers(ctx,fi,o={},onlyLayerId=null){if(o.hiResVectors){drawLayersH
     if(isAct){ctx.globalAlpha=l.op*o.buf.alpha;ctx.globalCompositeOperation=o.buf.comp||'source-over';ctx.drawImage(o.buf.canvas,0,0);ctx.globalCompositeOperation='source-over';}
     ctx.globalAlpha=1;}}
 
-function tinted(ctx,fi,color,alpha,onlyLayerId=null,hiResVectors=false){
+function tinted(ctx,fi,color,alpha,onlyLayerId=null,hiResVectors=false,original=false){
   const p=S.proj,f=p.frames[fi];if(!f)return;
   if(hiResVectors){
     const W=ctx.canvas.width,H=ctx.canvas.height,xf=ctx.getTransform();
@@ -920,16 +955,17 @@ function tinted(ctx,fi,color,alpha,onlyLayerId=null,hiResVectors=false){
     const t=hiTintScratchC,tc=t.getContext('2d',{alpha:true,desynchronized:true});
     tc.setTransform(1,0,0,1,0,0);tc.globalAlpha=1;tc.globalCompositeOperation='source-over';tc.clearRect(0,0,W,H);
     tc.setTransform(xf.a,xf.b,xf.c,xf.d,xf.e,xf.f);drawLayers(tc,fi,{hiResVectors:true},onlyLayerId);
-    tc.setTransform(1,0,0,1,0,0);tc.globalAlpha=1;tc.globalCompositeOperation='source-in';tc.fillStyle=color;tc.fillRect(0,0,W,H);tc.globalCompositeOperation='source-over';
+    tc.setTransform(1,0,0,1,0,0);
+    if(!original){tc.globalAlpha=1;tc.globalCompositeOperation='source-in';tc.fillStyle=color;tc.fillRect(0,0,W,H);tc.globalCompositeOperation='source-over';}
     ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=alpha;ctx.drawImage(t,0,0);ctx.restore();return;
   }
   // Include visibility/opacity/order in the key so layer-panel changes cannot leave stale onion skins.
   const layerSig=p.layers.map(l=>l.id+':'+(l.vis?1:0)+':'+l.op).join(',');
-  const key=[f.id,color,onlyLayerId||'*',layerSig,p.w,p.h].join('|');let t=tintedFrameCache.get(key);
+  const key=[f.id,original?'orig':color,onlyLayerId||'*',layerSig,p.w,p.h].join('|');let t=tintedFrameCache.get(key);
   if(!t){
     t=mk(p.w,p.h);const tc=t.getContext('2d',{alpha:true,desynchronized:true});
     drawLayers(tc,fi,{},onlyLayerId);
-    tc.globalAlpha=1;tc.globalCompositeOperation='source-in';tc.fillStyle=color;tc.fillRect(0,0,p.w,p.h);tc.globalCompositeOperation='source-over';
+    if(!original){tc.globalAlpha=1;tc.globalCompositeOperation='source-in';tc.fillStyle=color;tc.fillRect(0,0,p.w,p.h);tc.globalCompositeOperation='source-over';}
     tintedFrameCache.set(key,t);
     // Bound memory when users scrub through long timelines.
     if(tintedFrameCache.size>24){const first=tintedFrameCache.keys().next().value;tintedFrameCache.delete(first);}
@@ -937,22 +973,26 @@ function tinted(ctx,fi,color,alpha,onlyLayerId=null,hiResVectors=false){
   ctx.save();ctx.globalAlpha=alpha;ctx.drawImage(t,0,0);ctx.restore();}
 let paperTile=null;
 function paintTransparentPaper(ctx,p){if(!paperTile){paperTile=mk(24,24);const t=paperTile.getContext('2d');t.fillStyle='#f3f4f7';t.fillRect(0,0,24,24);t.fillStyle='#d8dbe2';t.fillRect(0,0,12,12);t.fillRect(12,12,12,12);}ctx.fillStyle=ctx.createPattern(paperTile,'repeat');ctx.fillRect(0,0,p.w,p.h);}
-function nearestKeyframes(p,fi){let bd=Infinity,best=[];for(let i=0;i<p.frames.length;i++){if(p.frames[i].poseMarker==='key'&&i!==fi){const d=Math.abs(i-fi);if(d<bd){bd=d;best=[i];}else if(d===bd)best.push(i);}}return best;}
-function allKeyframes(p,fi){const out=[];for(let i=0;i<p.frames.length;i++)if(p.frames[i].poseMarker==='key'&&i!==fi)out.push(i);return out;}
-function onionLoops(ctx,fi,hi){const p=S.proj,n=S.onion,onlyLayerId=n.activeLayerOnly&&p.layers[S.li]?p.layers[S.li].id:null;
-  for(let k=n.b;k>=1;k--){const j=fi-k;if(j>=0)tinted(ctx,j,n.prevColor||'#ff4d4d',n.o/100*Math.pow(n.fade==null?.72:n.fade,k-1),onlyLayerId,hi);}
-  for(let k=n.a;k>=1;k--){const j=fi+k;if(j<p.frames.length)tinted(ctx,j,n.nextColor||'#35c46a',n.o/100*Math.pow(n.fade==null?.72:n.fade,k-1),onlyLayerId,hi);}
+function isKeyType(marker,types){return !!marker&&!!types&&!!types[marker];}
+function nearestKeyframes(p,fi,types){let bd=Infinity,best=[];for(let i=0;i<p.frames.length;i++){if(isKeyType(p.frames[i].poseMarker,types)&&i!==fi){const d=Math.abs(i-fi);if(d<bd){bd=d;best=[i];}else if(d===bd)best.push(i);}}return best;}
+function allKeyframes(p,fi,types){const out=[];for(let i=0;i<p.frames.length;i++)if(isKeyType(p.frames[i].poseMarker,types)&&i!==fi)out.push(i);return out;}
+function onionLoops(ctx,fi,hi){const p=S.proj,n=S.onion,onlyLayerId=n.activeLayerOnly&&p.layers[S.li]?p.layers[S.li].id:null,orig=!!n.originalColors;
+  for(let k=n.b;k>=1;k--){const j=fi-k;if(j>=0)tinted(ctx,j,n.prevColor||'#ff4d4d',n.o/100*Math.pow(n.fade==null?.72:n.fade,k-1),onlyLayerId,hi,orig);}
+  for(let k=n.a;k>=1;k--){const j=fi+k;if(j<p.frames.length)tinted(ctx,j,n.nextColor||'#35c46a',n.o/100*Math.pow(n.fade==null?.72:n.fade,k-1),onlyLayerId,hi,orig);}
   if(n.showKey==='nearest'||n.showKey==='all'){
     // Keyframe(s) stay visible as a reference regardless of the before/after range above.
     // 'nearest': the closest keyframe(s) to this frame — if two are equally close (one
     // before, one after), both are shown. 'all': every keyframe in the project. Either
     // way, skip any that are already covered by the range so they don't double-draw.
-    const kfs=n.showKey==='all'?allKeyframes(p,fi):nearestKeyframes(p,fi);
-    for(const kf of kfs){if(kf<fi-n.b||kf>fi+n.a)tinted(ctx,kf,n.keyColor||'#ffb020',n.o/100,onlyLayerId,hi);}
+    // Which tag types count as "keyframes" here is configurable (n.keyTypes) — by default
+    // only frames tagged 'key', but breakdown/contact/anticipation/extreme can opt in too.
+    const kfs=n.showKey==='all'?allKeyframes(p,fi,n.keyTypes):nearestKeyframes(p,fi,n.keyTypes);
+    const kAlpha=(n.keyOpacity==null?60:n.keyOpacity)/100;
+    for(const kf of kfs){if(kf<fi-n.b||kf>fi+n.a)tinted(ctx,kf,n.keyColor||'#ffb020',kAlpha,onlyLayerId,hi,orig);}
   }}
 /* Onion frames can't change mid-stroke, so tint them once per stroke instead of on every animation frame. */
 function onionCached(ctx,fi){const p=S.proj,n=S.onion,xf=ctx.getTransform(),W=ctx.canvas.width,H=ctx.canvas.height,
-  key=[W,H,xf.a,xf.b,xf.c,xf.d,xf.e,xf.f,fi,S.li,p.frames.length,p.frames.slice(Math.max(0,fi-n.b),fi+n.a+1).map(q=>q.id).join(','),p.layers.map(l=>l.id+':'+(l.vis?1:0)+':'+l.op+':'+(l.blend||'')).join(','),n.b,n.a,n.o,n.fade,n.prevColor,n.nextColor,n.activeLayerOnly,n.showKey,n.keyColor,p.frames.map((q,i)=>q.poseMarker==='key'?i:'').join(',')].join('|');
+  key=[W,H,xf.a,xf.b,xf.c,xf.d,xf.e,xf.f,fi,S.li,p.frames.length,p.frames.slice(Math.max(0,fi-n.b),fi+n.a+1).map(q=>q.id).join(','),p.layers.map(l=>l.id+':'+(l.vis?1:0)+':'+l.op+':'+(l.blend||'')).join(','),n.b,n.a,n.o,n.fade,n.prevColor,n.nextColor,n.activeLayerOnly,n.showKey,n.keyColor,n.keyOpacity,n.originalColors,n.keyTypes&&Object.keys(n.keyTypes).filter(k=>n.keyTypes[k]).join(','),p.frames.map((q,i)=>isKeyType(q.poseMarker,n.keyTypes)?i:'').join(',')].join('|');
   if(!onionCache||onionCache.key!==key){const c=mk(W,H),cc=c.getContext('2d',{alpha:true,desynchronized:true});cc.setTransform(xf.a,xf.b,xf.c,xf.d,xf.e,xf.f);onionLoops(cc,fi,true);onionCache={key,c};}
   ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(onionCache.c,0,0);ctx.restore();}
 function composite(ctx,fi,o={}){const p=S.proj;ctx.clearRect(0,0,p.w,p.h);
@@ -1713,22 +1753,31 @@ function initOptbar(){const bind=(id,fn)=>$(id).addEventListener('input',e=>fn(+
   $$('#fillsrc button').forEach(b=>b.onclick=()=>{S.fillSrc=b.dataset.src;$$('#fillsrc button').forEach(x=>x.setAttribute('aria-pressed',x===b));});
   $$('#shapefill button').forEach(b=>b.onclick=()=>{S.shapeFill=+b.dataset.sf;$$('#shapefill button').forEach(x=>x.setAttribute('aria-pressed',x===b));});
   $('#ed-undo').onclick=undo;$('#ed-redo').onclick=redo;
-  const saveOnionPrefs=()=>lsSet('fb.onionPrefs',{on:S.onion.on,b:S.onion.b,a:S.onion.a,o:S.onion.o,fade:S.onion.fade,activeLayerOnly:S.onion.activeLayerOnly,prevColor:S.onion.prevColor,nextColor:S.onion.nextColor,showKey:S.onion.showKey,keyColor:S.onion.keyColor});
+
   const onionColorPresets=()=>lsGet('fb.onionColorPairs',[]);
   const refreshOnionColorPresets=()=>{const sel=$('#on-color-presets'),arr=onionColorPresets(),keep=sel.value;sel.innerHTML='<option value="">Saved pairs…</option>'+arr.map((p,i)=>`<option value="${i}">${p.prevColor} / ${p.nextColor}</option>`).join('');if(arr[keep])sel.value=keep;};
   $('#on-save-colors').onclick=()=>{const arr=onionColorPresets();arr.push({prevColor:S.onion.prevColor||'#ff4d4d',nextColor:S.onion.nextColor||'#35c46a'});lsSet('fb.onionColorPairs',arr.slice(-16));refreshOnionColorPresets();$('#on-color-presets').value=String(Math.min(arr.length,16)-1);toast('Onion colour pair saved');};
   $('#on-color-presets').onchange=e=>{const p=onionColorPresets()[+e.target.value];if(!p)return;S.onion.prevColor=p.prevColor;S.onion.nextColor=p.nextColor;$('#on-prev-color').value=p.prevColor;$('#on-next-color').value=p.nextColor;saveOnionPrefs();needsRender();};
   $('#on-color-presets').oncontextmenu=e=>{e.preventDefault();const sel=e.currentTarget,i=+sel.value;if(sel.value===''||!Number.isInteger(i))return;const arr=onionColorPresets();arr.splice(i,1);lsSet('fb.onionColorPairs',arr);refreshOnionColorPresets();toast('Saved onion colour pair removed');};
   refreshOnionColorPresets();
-  const syncOnionControls=()=>{[['#on-b','b'],['#on-a','a'],['#on-o','o']].forEach(([id,k])=>{$(id).value=S.onion[k];const nn=$(id+'-n');if(nn)nn.value=S.onion[k];});$('#on-fade').value=Math.round((S.onion.fade==null?.72:S.onion.fade)*100);$('#on-fade-val').textContent=$('#on-fade').value+'% remaining per frame';$('#on-active-layer').checked=!!S.onion.activeLayerOnly;$$('#on-key-mode button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.km===S.onion.showKey)));$('#on-key-color').value=S.onion.keyColor||'#ffb020';$('#on-prev-color').value=S.onion.prevColor||'#ff4d4d';$('#on-next-color').value=S.onion.nextColor||'#35c46a';$('#ed-onion').setAttribute('aria-pressed',String(!!S.onion.on));};
+  const syncOnionControls=()=>{[['#on-b','b'],['#on-a','a'],['#on-o','o']].forEach(([id,k])=>{$(id).value=S.onion[k];const nn=$(id+'-n');if(nn)nn.value=S.onion[k];});$('#on-fade').value=Math.round((S.onion.fade==null?.72:S.onion.fade)*100);$('#on-fade-val').textContent=$('#on-fade').value+'% remaining per frame';$('#on-active-layer').checked=!!S.onion.activeLayerOnly;$('#on-original-colors').checked=!!S.onion.originalColors;$('#on-prev-color').value=S.onion.prevColor||'#ff4d4d';$('#on-next-color').value=S.onion.nextColor||'#35c46a';$('#ed-onion').setAttribute('aria-pressed',String(!!S.onion.on));syncKeyonionUI();};
   syncOnionControls();
   const tg=(id,fn)=>$(id).onclick=e=>{const b=e.currentTarget,on=b.getAttribute('aria-pressed')!=='true';b.setAttribute('aria-pressed',on);fn(on);needsRender();};
   tg('#ed-onion',on=>{S.onion.on=on;saveOnionPrefs();});tg('#ed-grid',on=>S.grid=on);
   const ob=(id,k)=>$(id).addEventListener('input',e=>{S.onion[k]=+e.target.value;saveOnionPrefs();needsRender();});ob('#on-b','b');ob('#on-a','a');ob('#on-o','o');
   $('#on-fade').addEventListener('input',e=>{S.onion.fade=+e.target.value/100;$('#on-fade-val').textContent=e.target.value+'% remaining per frame';saveOnionPrefs();needsRender();});
   $('#on-active-layer').addEventListener('change',e=>{S.onion.activeLayerOnly=e.target.checked;saveOnionPrefs();needsRender();});
-  $$('#on-key-mode button').forEach(b=>b.onclick=()=>{S.onion.showKey=b.dataset.km;$$('#on-key-mode button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));saveOnionPrefs();needsRender();});
-  $('#on-key-color').addEventListener('input',e=>{S.onion.keyColor=e.target.value;saveOnionPrefs();needsRender();});
+  $('#on-original-colors').addEventListener('change',e=>{S.onion.originalColors=e.target.checked;saveOnionPrefs();needsRender();});
+  $$('#ko-mode button').forEach(b=>b.onclick=()=>{S.onion.showKey=b.dataset.km;saveOnionPrefs();syncKeyonionUI();needsRender();});
+  $('#ko-color').addEventListener('input',e=>{S.onion.keyColor=e.target.value;saveOnionPrefs();needsRender();});
+  $('#ko-opacity').addEventListener('input',e=>{S.onion.keyOpacity=+e.target.value;saveOnionPrefs();needsRender();});
+  ['key','breakdown','contact','anticipation','extreme'].forEach(t=>{const el=$('#ko-type-'+t);if(!el)return;el.addEventListener('change',e=>{S.onion.keyTypes=S.onion.keyTypes||{};S.onion.keyTypes[t]=e.target.checked;saveOnionPrefs();needsRender();});});
+  const keyColorPresets=()=>lsGet('fb.keyColorPresets',[]);
+  const refreshKeyColorPresets=()=>{const sel=$('#ko-color-presets'),arr=keyColorPresets(),keep=sel.value;sel.innerHTML='<option value="">Saved colours…</option>'+arr.map((c,i)=>`<option value="${i}">${c}</option>`).join('');if(arr[keep])sel.value=keep;};
+  $('#ko-save-color').onclick=()=>{const arr=keyColorPresets();arr.push(S.onion.keyColor||'#ffb020');lsSet('fb.keyColorPresets',arr.slice(-16));refreshKeyColorPresets();$('#ko-color-presets').value=String(Math.min(arr.length,16)-1);toast('Keyframe colour saved');};
+  $('#ko-color-presets').onchange=e=>{const c=keyColorPresets()[+e.target.value];if(!c)return;S.onion.keyColor=c;$('#ko-color').value=c;saveOnionPrefs();needsRender();};
+  $('#ko-color-presets').oncontextmenu=e=>{e.preventDefault();const sel=e.currentTarget,i=+sel.value;if(sel.value===''||!Number.isInteger(i))return;const arr=keyColorPresets();arr.splice(i,1);lsSet('fb.keyColorPresets',arr);refreshKeyColorPresets();toast('Saved keyframe colour removed');};
+  refreshKeyColorPresets();
   $('#on-prev-color').addEventListener('input',e=>{S.onion.prevColor=e.target.value;saveOnionPrefs();needsRender();});
   $('#on-next-color').addEventListener('input',e=>{S.onion.nextColor=e.target.value;saveOnionPrefs();needsRender();});
   $('#ed-side').onclick=()=>$('#side').classList.toggle('open');
@@ -1791,6 +1840,10 @@ function initStagebtnsDrag(zb){
 }
 function markSel(){refreshHold();$$('#strip .fr').forEach((e,i)=>{e.classList.toggle('sel',i===(S.playing?S.playFi:S.fi));e.classList.toggle('multiSel',selectedFrames.has(i));});const e=$('#strip').children[S.playing?S.playFi:S.fi];if(e){const s=$('#strip'),l=e.offsetLeft-s.offsetLeft;if(l<s.scrollLeft||l+e.offsetWidth>s.scrollLeft+s.clientWidth)s.scrollTo({left:l-s.clientWidth/2+e.offsetWidth/2,behavior:S.playing?'auto':'smooth'});}refreshKeyBtn();}
 function refreshKeyBtn(){if(!S.proj)return;const on=F()&&F().poseMarker==='key';$$('#sf-key,#t-key').forEach(b=>b.setAttribute('aria-pressed',String(on)));}
+const saveOnionPrefs=()=>lsSet('fb.onionPrefs',{on:S.onion.on,b:S.onion.b,a:S.onion.a,o:S.onion.o,fade:S.onion.fade,activeLayerOnly:S.onion.activeLayerOnly,prevColor:S.onion.prevColor,nextColor:S.onion.nextColor,showKey:S.onion.showKey,keyColor:S.onion.keyColor,keyOpacity:S.onion.keyOpacity,originalColors:S.onion.originalColors,keyTypes:S.onion.keyTypes});
+const KMODES=['off','nearest','all'];
+function cycleKeyMode(){const i=KMODES.indexOf(S.onion.showKey);S.onion.showKey=KMODES[(i+1+KMODES.length)%KMODES.length];saveOnionPrefs();syncKeyonionUI();needsRender();toast('Keyframe onion skin: '+(S.onion.showKey==='off'?'Off':S.onion.showKey==='nearest'?'Nearest':'All'));}
+function syncKeyonionUI(){const mode=S.onion.showKey||'off',btn=$('#sf-keymode');if(btn){btn.dataset.kmode=mode;const lbl=$('.kmode-label',btn);if(lbl)lbl.textContent=mode==='off'?'Off':mode==='all'?'All':'Nearest';}$$('#ko-mode button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.km===mode)));const kc=$('#ko-color');if(kc)kc.value=S.onion.keyColor||'#ffb020';const ko=$('#ko-opacity');if(ko)ko.value=S.onion.keyOpacity==null?60:S.onion.keyOpacity;const kt=S.onion.keyTypes||{};['key','breakdown','contact','anticipation','extreme'].forEach(t=>{const el=$('#ko-type-'+t);if(el)el.checked=!!kt[t];});}
 function toggleKeyframe(){if(!S.proj)return;const f=F(),was=f.poseMarker;f.poseMarker=was==='key'?'':'key';markDoc();buildStrip();markSel();toast(f.poseMarker?'Marked as keyframe':'Keyframe cleared');}
 function gotoFrame(i){dbg('goto',String(i));onionCache=null;if(S.playing)stopPlay();i=clamp(i,0,S.proj.frames.length-1);commitFloat();S.fi=i;markSel();refreshBgHint();syncLayerOp();refreshRotoPanel();needsRender();}
 function addFrame(at,src){const p=S.proj,nf=newFrame();dbg('addFrame','at='+at+(src?' dup':''));if(src){nf.hold=src.hold;nf.note=src.note||'';nf.poseMarker=src.poseMarker||'';for(const k in src.cels)nf.cels[k]=snapCel(src.cels[k]);nf.vectors=cloneVectors(src.vectors);nf.links={...(src.links||{})};nf.bg=src.bg?{...src.bg,bmp:null,loading:false}:null;}
@@ -2316,6 +2369,19 @@ function initFloatUI(){
   /* add-frame button on the canvas */
   const sa=$('#sf-add');if(sa)sa.onclick=()=>$('#t-add').click();
   const sk=$('#sf-key');if(sk)sk.onclick=toggleKeyframe;
+  /* keyframe onion skin: tap the canvas key icon to cycle Off/Nearest/All, long-press (or right-click) for its settings */
+  const kmBtn=$('#sf-keymode'),kmPop=$('#keyonionpop');
+  if(kmBtn&&kmPop){const showKm=on=>{kmPop.hidden=!on;if(on)syncKeyonionUI();};
+    $('#keyonion-close').onclick=()=>showKm(false);
+    let kmT=0,kmFired=false;
+    const kmClr=()=>{clearTimeout(kmT);kmT=0;};
+    kmBtn.addEventListener('pointerdown',()=>{kmFired=false;kmClr();kmT=setTimeout(()=>{kmT=0;kmFired=true;showKm(kmPop.hidden);},450);});
+    kmBtn.addEventListener('click',e=>{if(kmFired){kmFired=false;return;}cycleKeyMode();});
+    ['pointerup','pointerleave','pointercancel'].forEach(t=>kmBtn.addEventListener(t,kmClr));
+    kmBtn.addEventListener('contextmenu',e=>{e.preventDefault();if(!kmFired)showKm(kmPop.hidden);});
+    document.addEventListener('pointerdown',e=>{if(!kmPop.hidden&&!kmPop.contains(e.target)&&!kmBtn.contains(e.target))showKm(false);});
+    document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!kmPop.hidden)showKm(false);});
+    syncKeyonionUI();}
   /* onion skin card: long-press (or right-click) the onion icon */
   const pop=$('#onionpop'),ob=$('#ed-onion');
   if(pop&&ob){const show=on=>{pop.hidden=!on;};
