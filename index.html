@@ -41,8 +41,8 @@
 #c-guides,#c-sun,#c-flare{pointer-events:none}
 .c-msg{position:absolute;inset:0;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;text-align:center;padding:20px;color:#3a4152;font-weight:600;z-index:2}
 .c-vtop{position:absolute;right:10px;top:10px;display:flex;gap:6px;z-index:1}
-.c-snap{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);display:flex;gap:4px;padding:5px;background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:0 6px 20px var(--shadow);max-width:calc(100% - 16px);overflow-x:auto;scrollbar-width:none;z-index:1}
-.c-snap button{flex:none;padding:8px 12px;border-radius:11px;font-size:12px;font-weight:700;color:var(--fg)}
+.c-snap{position:absolute;left:8px;right:8px;margin-inline:auto;width:max-content;bottom:10px;display:flex;flex-wrap:wrap;justify-content:center;gap:4px;padding:5px;background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:0 6px 20px var(--shadow);max-width:calc(100% - 16px);overflow:visible;z-index:1}
+.c-snap button{flex:none;white-space:nowrap;padding:8px 12px;border-radius:11px;font-size:12px;font-weight:700;color:var(--fg)}
 .c-snap button:hover{background:var(--surface2)}
 .c-snap button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
 .c-panel{display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--line);background:var(--surface)}
@@ -1096,7 +1096,7 @@ function composite(ctx,fi,o={}){const p=S.proj;ctx.clearRect(0,0,p.w,p.h);
 function flatten(fi,scale=1,o={}){const p=S.proj,c=scale===1?mk(p.w,p.h):mk(p.w*scale,p.h*scale),x=c.getContext('2d');x.imageSmoothingQuality='high';if(scale!==1)x.scale(scale,scale);composite(x,fi,{forcePaper:o.paper,bg:o.bg,noPaper:o.noPaper,exporting:!!o.exporting});return c;}
 
 /* ===== render loop ===== */
-let rq=false,vgT=0,lastRT=0,onionCache=null;const view=()=>$('#view'),fx=()=>$('#fx');
+let rq=false,vgT=0,lastRT=0,onionCache=null,viewBusy=false; /* viewBusy: two fingers are down, so keep the GPU-transformed bitmap and sharpen once they lift */const view=()=>$('#view'),fx=()=>$('#fx');
 function needsRender(){if(rq)return;rq=true;const go=()=>{
   // Heavy path-replay brushes: never let rendering starve input; skip frames when the last render was slow.
   if(S.stroke&&!S.stroke.previewCanvas&&(S.rt||0)>10&&performance.now()-lastRT<Math.min(70,S.rt*.9)){requestAnimationFrame(go);return;}
@@ -1124,13 +1124,17 @@ function renderView(){const p=S.proj;if(!p)return;if(S.vg){S.vg=false;clearTimeo
    If they differ, a cache served stale pixels (the "that isn't supposed to happen" ghost). Log it and repair. */
 function verifyView(){try{
   if(!DBG.verify||S.view!=='editor'||S.playing||S.stroke||S.sel||!S.proj||!S.onion.on)return;
+  // The check only means something when the screen shows a render of exactly the CURRENT view. While a pinch / pan / wheel-zoom is in flight the canvas is
+  // deliberately a GPU-transformed bitmap of an older render, so it always "differs" - that used to be reported as a stale ghost, force a re-render mid-gesture,
+  // reschedule another check ~200ms later, and loop for as long as you kept moving. Skip; the render that follows the gesture schedules a fresh check.
+  if(S.vg||viewBusy||panning||activeTool||!S.rv||S.rv.z!==S.zoom||S.rv.tx!==S.tx||S.rv.ty!==S.ty)return;
   const v=view();if(!v||!v.width)return;const W=v.width,H=v.height,d=window.devicePixelRatio||1,sw=Math.min(240,W),sh=Math.max(1,Math.round(H*sw/W));
   const grab=src=>{const c=mk(sw,sh),x=c.getContext('2d',{willReadFrequently:true});x.drawImage(src,0,0,sw,sh);return x.getImageData(0,0,sw,sh).data;};
   const A=grab(v),fi=S.fi,gen0=cacheGen;
   onionCache=null;tintedFrameCache.clear();highResLayerCache.clear();layerBitmapCache.clear();
   const f=mk(W,H),fc=f.getContext('2d',{alpha:true});fc.setTransform(d*S.zoom,0,0,d*S.zoom,d*S.tx,d*S.ty);
   composite(fc,fi,{onion:true,grid:true,guides:true,live:null,hiResVectors:true});
-  if(fi!==S.fi||gen0!==cacheGen)return;
+  if(fi!==S.fi||gen0!==cacheGen||S.vg||viewBusy||S.rv.z!==S.zoom||S.rv.tx!==S.tx||S.rv.ty!==S.ty)return;
   const B=grab(f);let bad=0;for(let i=0;i<A.length;i+=4){if(Math.abs(A[i]-B[i])>28||Math.abs(A[i+1]-B[i+1])>28||Math.abs(A[i+2]-B[i+2])>28||Math.abs(A[i+3]-B[i+3])>28)bad++;}
   const frac=bad/(A.length/4);
   if(frac>0.003){dbg('STALE-CACHE-DETECTED','differing='+(frac*100).toFixed(2)+'%');toast('Stale ghost detected and repaired \u2014 copy bug log from onion settings');needsRender();}
@@ -1143,7 +1147,8 @@ function viewMoved(){const v=view();if(!v||!S.rv){applyViewT();return;}const b=S
   S.vg=true;
   v.style.transformOrigin='0 0';v.style.willChange='transform';v.style.transform='translate('+(S.tx-k*b.tx)+'px,'+(S.ty-k*b.ty)+'px) scale('+k+')';
   const f=fx();if(f)f.style.opacity='0';const zp=$('#zpct');if(zp)zp.textContent=Math.round(S.zoom*100)+'%';
-  clearTimeout(vgT);vgT=setTimeout(settleView,140);}
+  clearTimeout(vgT);vgT=setTimeout(settleViewIdle,140);}
+function settleViewIdle(){if(viewBusy){vgT=setTimeout(settleViewIdle,140);return;}settleView();}
 function settleView(){clearTimeout(vgT);if(S.vg&&S.view==='editor')renderView();}
 function applyViewT(){view().style.transform='none';const zp=$('#zpct');if(zp)zp.textContent=Math.round(S.zoom*100)+'%';needsRender();}
 /* overlay canvas is screen-sized (device pixels) so selection handles, guides and the brush cursor stay sharp at any zoom */
@@ -1654,71 +1659,90 @@ function toolUp(e){if(activeTool==='stroke')strokeEnd(e);else if(activeTool==='s
   activeTool=null;}
 function cancelTool(){if(activeTool==='stroke')strokeCancel();else if(activeTool==='shape')shapeCancel();else if(activeTool==='lasso')lasso=null;activeTool=null;needsRender();}
 function initStage(){const st=$('#stage');
-  // Touch gestures have ONE source of truth: Touch Events snapshots. Pointer Events
-  // remain responsible for drawing and mouse/pen input, but never calculate a pinch.
-  let touchGesture=null;
-  st.addEventListener('pointerdown',e=>{settleView();if(S.playing)return;if(motionPathMode){const [mx,my]=toCanvasXY(e);S.proj.motionPath=S.proj.motionPath||[];S.proj.motionPath.push({x:mx,y:my});markDoc();needsRender();e.preventDefault();return;}
-    try{st.setPointerCapture(e.pointerId);}catch(_){}
-    ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY,type:e.pointerType});
+  /* ---- Stage input model ------------------------------------------------------------------------------------
+     Pointer Events are the ONLY source of truth (the stage is touch-action:none, so the browser never takes a touch).
+       - mouse / pen: tools and pans start immediately.
+       - finger: a lone finger is only "pending" until it moves past TOUCH_SLOP, lifts (a tap), or a 2nd finger lands.
+         Two fingers = pan + pinch, and NOTHING is drawn, filled, lifted or dropped as a motion-path point by the first finger.
+       - only the pointer that started a tool / pan can move or end it (a resting palm or 2nd hand cannot hijack a stroke).
+       - the pinch is solved once per animation frame from BOTH fingers' latest positions, always against the baseline taken
+         when the gesture (re)started - never incrementally - so it cannot drift or oscillate, and adding / lifting a finger
+         just takes a fresh baseline instead of jumping.
+       - while two fingers are down the view stays a GPU-transformed bitmap; the sharp re-render happens once they lift. */
+  const TOUCH_SLOP=5,PINCH_DEADZONE=.015;
+  let owner=null,pend=null,pinch=null,pinchRaf=0;
+  const typeOf=id=>{const p=ptrs.get(id);return p&&p.type;};
+  const touchIds=()=>{const a=[];for(const [id,v] of ptrs)if(v.type==='touch')a.push(id);return a;};
+  const startPan=e=>{owner=e.pointerId;panning={id:e.pointerId,x:e.clientX,y:e.clientY,tx:S.tx,ty:S.ty};};
+  const beginTool=e=>{settleView();
+    if(motionPathMode){const [mx,my]=toCanvasXY(e);S.proj.motionPath=S.proj.motionPath||[];S.proj.motionPath.push({x:mx,y:my});markDoc();needsRender();return false;}
+    toolDown(e);return !!activeTool;};
+  const commitPend=()=>{const p=pend;if(!p)return;pend=null;
+    if(beginTool(p.down)){owner=p.id;for(const m of p.moves)toolMove(m);}else if(owner===p.id)owner=null;};
+  const dropInteraction=()=>{pend=null;if(activeTool)cancelTool();panning=null;owner=null;};
+  const applyPinch=()=>{if(!pinch)return;const A=ptrs.get(pinch.a),B=ptrs.get(pinch.b);if(!A||!B)return;
+    const r=stageRect(),mx=(A.x+B.x)/2-r.left,my=(A.y+B.y)/2-r.top,d=Math.max(1,Math.hypot(A.x-B.x,A.y-B.y));
+    // soft dead-zone on the scale only: a two-finger PAN no longer wobbles in and out from finger jitter, and there is no jump when it is crossed
+    let ln=Math.log(d/pinch.d0);ln=Math.abs(ln)<=PINCH_DEADZONE?0:ln-Math.sign(ln)*PINCH_DEADZONE;
+    const z=clamp(pinch.z0*Math.exp(ln),.1,16),ax=(pinch.mx0-pinch.tx0)/pinch.z0,ay=(pinch.my0-pinch.ty0)/pinch.z0;
+    S.zoom=z;S.tx=mx-ax*z;S.ty=my-ay*z;viewMoved();};
+  const flushPinch=()=>{if(pinchRaf){cancelAnimationFrame(pinchRaf);pinchRaf=0;applyPinch();}};
+  const endPinch=()=>{if(pinchRaf){cancelAnimationFrame(pinchRaf);pinchRaf=0;}pinch=null;viewBusy=false;clearTimeout(vgT);vgT=setTimeout(settleView,50);};
+  const rebase=()=>{const ids=touchIds();if(ids.length<2){if(pinch)endPinch();return;}
+    const a=ids[0],b=ids[1],A=ptrs.get(a),B=ptrs.get(b),r=stageRect();   // the two OLDEST fingers drive the gesture; extra touches (palm) are ignored
+    pinch={a,b,d0:Math.max(1,Math.hypot(A.x-B.x,A.y-B.y)),mx0:(A.x+B.x)/2-r.left,my0:(A.y+B.y)/2-r.top,z0:S.zoom,tx0:S.tx,ty0:S.ty};viewBusy=true;};
+  const resetInput=()=>{ptrs.clear();dropInteraction();if(pinch)endPinch();};
+  // A touch whose pointerup was lost (view switched, tab hidden...) would otherwise count as a phantom 2nd finger forever.
+  const pruneGhosts=()=>{for(const [id,v] of ptrs)if(v.cap&&!st.hasPointerCapture(id)){resetInput();return;}};
+  st.addEventListener('pointerdown',e=>{
+    const touch=e.pointerType==='touch';
     if(e.pointerType==='pen')S.penSeen=true;
-    if(e.pointerType==='touch'){
-      const touches=[...ptrs.values()].filter(v=>v.type==='touch');
-      if(touches.length>=2){cancelTool();panning=null;return;}
-      if(S.penSeen&&S.penOnly){ptrs.delete(e.pointerId);try{st.releasePointerCapture(e.pointerId);}catch(_){}return;}
+    if(S.playing){settleView();return;}
+    if(touch&&S.penSeen&&S.penOnly)return;                       // "ignore finger touches once a pen has been used"
+    pruneGhosts();
+    if(!touch){
+      const ot=owner!=null?typeOf(owner):null;
+      if(ot&&ot!=='touch')return;                                 // a pen / mouse stroke is already running: this one is a stray
+      dropInteraction();if(pinch)endPinch();                      // pen and mouse win over fingers
     }
-    if(e.button===1||spaceDown||S.hand||e.button===2){panning={id:e.pointerId,x:e.clientX,y:e.clientY,tx:S.tx,ty:S.ty};return;}
-    // Don't let a third finger start a tool while a two-finger gesture is active.
-    if(e.pointerType==='touch'&&touchGesture)return;
-    toolDown(e);});
+    let cap=true;try{st.setPointerCapture(e.pointerId);}catch(_){cap=false;}
+    ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY,type:e.pointerType,cap});
+    if(touch){
+      if(touchIds().length>=2){if(!pinch){dropInteraction();rebase();}return;}   // 2nd finger: abandon whatever the 1st began, start the pinch
+      if(!motionPathMode&&(S.hand||spaceDown)){startPan(e);return;}
+      pend={id:e.pointerId,down:e,moves:[],tapOnly:motionPathMode||toolKind()==='fill'};owner=e.pointerId;return;
+    }
+    if(!motionPathMode&&(e.button===1||spaceDown||S.hand||e.button===2)){startPan(e);return;}
+    if(beginTool(e))owner=e.pointerId;});
   st.addEventListener('pointermove',e=>{
-    const point=ptrs.get(e.pointerId);if(point){point.x=e.clientX;point.y=e.clientY;}
-    if(e.pointerType==='touch'){
-      // Touch Events below update both fingers from the same browser snapshot.
-      if(touchGesture)return;
-      const touchCount=[...ptrs.values()].filter(v=>v.type==='touch').length;
-      if(touchCount>=2)return;
-    }else{S.hover=toCanvasXY(e);if(!activeTool)needsRender();}
+    const p=ptrs.get(e.pointerId);if(p){p.x=e.clientX;p.y=e.clientY;}
+    if(e.pointerType!=='touch'){S.hover=toCanvasXY(e);if(!activeTool)needsRender();}
+    if(!p)return;
+    if(pinch){if((e.pointerId===pinch.a||e.pointerId===pinch.b)&&!pinchRaf)pinchRaf=requestAnimationFrame(()=>{pinchRaf=0;applyPinch();});return;}
+    if(pend&&pend.id===e.pointerId){
+      pend.moves.push(e);
+      if(Math.hypot(e.clientX-pend.down.clientX,e.clientY-pend.down.clientY)>TOUCH_SLOP){if(pend.tapOnly){pend=null;owner=null;}else commitPend();}
+      return;}
+    if(owner!==e.pointerId)return;
     if(panning&&panning.id===e.pointerId){S.tx=panning.tx+e.clientX-panning.x;S.ty=panning.ty+e.clientY-panning.y;viewMoved();return;}
     if(activeTool)toolMove(e);});
-  const up=e=>{ptrs.delete(e.pointerId);
-    if(e.pointerType==='touch'&&touchGesture)return;
-    if(panning&&panning.id===e.pointerId){panning=null;return;}
-    if(activeTool)toolUp(e);};
-  st.addEventListener('pointerup',up);
-  st.addEventListener('pointercancel',e=>{ptrs.delete(e.pointerId);if(e.pointerType==='touch')touchGesture=null;panning=null;if(activeTool)cancelTool();});
-  st.addEventListener('touchstart',e=>{
-    if(S.playing||S.penSeen&&S.penOnly)return;
-    if(e.touches.length===2){
-      cancelTool();panning=null;
-      const r=stageRect(),a=e.touches[0],b=e.touches[1];
-      const mx=(a.clientX+b.clientX)/2-r.left,my=(a.clientY+b.clientY)/2-r.top;
-      const d=Math.max(1,Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY));
-      touchGesture={ids:[a.identifier,b.identifier],startD:d,startMx:mx,startMy:my,startZoom:S.zoom,startTx:S.tx,startTy:S.ty};
-      e.preventDefault();
-    }else if(e.touches.length>2){touchGesture=null;cancelTool();panning=null;e.preventDefault();}
-  },{passive:false});
-  st.addEventListener('touchmove',e=>{
-    if(!touchGesture)return;
-    const find=id=>{for(const t of e.touches)if(t.identifier===id)return t;return null;};
-    const a=find(touchGesture.ids[0]),b=find(touchGesture.ids[1]);
-    if(!a||!b){touchGesture=null;return;}
-    e.preventDefault();
-    const r=stageRect(),mx=(a.clientX+b.clientX)/2-r.left,my=(a.clientY+b.clientY)/2-r.top;
-    const d=Math.max(1,Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY));
-    // Decompose the gesture geometrically: centroid translation is pan; distance
-    // ratio is zoom. Solve from one fixed baseline each event to avoid drift.
-    const z=clamp(touchGesture.startZoom*d/touchGesture.startD,.1,16);
-    const anchorX=(touchGesture.startMx-touchGesture.startTx)/touchGesture.startZoom;
-    const anchorY=(touchGesture.startMy-touchGesture.startTy)/touchGesture.startZoom;
-    S.zoom=z;S.tx=mx-anchorX*z;S.ty=my-anchorY*z;
-    viewMoved();
-  },{passive:false});
-  const finishTouch=e=>{
-    if(touchGesture){const ids=new Set([...e.touches].map(t=>t.identifier));
-      if(!ids.has(touchGesture.ids[0])||!ids.has(touchGesture.ids[1]))touchGesture=null;}
-  };
-  st.addEventListener('touchend',finishTouch,{passive:true});
-  st.addEventListener('touchcancel',()=>{touchGesture=null;},{passive:true});
+  const end=(e,cancelled)=>{const id=e.pointerId;if(!ptrs.has(id))return;
+    if(pinch&&(id===pinch.a||id===pinch.b)){flushPinch();ptrs.delete(id);rebase();return;}
+    ptrs.delete(id);
+    if(pend&&pend.id===id){if(!cancelled){commitPend();if(activeTool&&owner===id)toolUp(e);}else pend=null;if(owner===id)owner=null;return;}   // a tap
+    if(owner!==id)return;
+    owner=null;
+    if(panning&&panning.id===id){panning=null;return;}
+    if(activeTool){if(cancelled)cancelTool();else toolUp(e);}};
+  st.addEventListener('pointerup',e=>end(e,false));
+  st.addEventListener('pointercancel',e=>end(e,true));
+  st.addEventListener('lostpointercapture',e=>end(e,true));
+  window.addEventListener('blur',resetInput);document.addEventListener('visibilitychange',()=>{if(document.hidden)resetInput();});
+  // The page must never run its own pinch / scroll on the canvas. touch-action:none already says so; these are belt-and-braces for
+  // older iOS Safari, which can still start a page pinch from the second finger. They calculate nothing.
+  st.addEventListener('touchstart',e=>{if(e.touches.length>1)e.preventDefault();},{passive:false});
+  st.addEventListener('touchmove',e=>{if(e.touches.length>1)e.preventDefault();},{passive:false});
+  ['gesturestart','gesturechange','gestureend'].forEach(t=>st.addEventListener(t,e=>e.preventDefault(),{passive:false}));
   st.addEventListener('pointerleave',e=>{if(e.pointerType!=='touch'){S.hover=null;needsRender();}});
   st.addEventListener('contextmenu',e=>e.preventDefault());
   st.addEventListener('wheel',e=>{e.preventDefault();const r=stageRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
@@ -1727,7 +1751,7 @@ function initStage(){const st=$('#stage');
   $('#stagewrap').addEventListener('pointerdown',e=>{if(e.target.closest&&e.target.closest('#rail'))return;closeOpts();},true);const zb=$('#stagebtns'),setZC=(c,anim)=>{const zc=$('#zcollapse');zc.setAttribute('aria-expanded',String(!c));zc.setAttribute('aria-label',c?'Expand zoom controls':'Collapse zoom controls');lsSet('fb.zoomCollapsed',c);zb._zcState=c;if(anim)animateZoomPill(zb,c);else{cancelZoomPillAnim(zb);zb.classList.toggle('collapsed',c);}};setZC(!!lsGet('fb.zoomCollapsed',false));$('#zcollapse').onclick=()=>setZC(!zb._zcState,true);
   initStagebtnsDrag(zb);
   $('#zout').onclick=()=>zoomBy(1/1.25);$('#zhand').onclick=()=>{S.hand=!S.hand;$('#zhand').setAttribute('aria-pressed',String(S.hand));$('#zhand').classList.toggle('on',S.hand);$('#stagewrap').style.cursor=S.hand?'grab':'';};$('#zin').onclick=()=>zoomBy(1.25);$('#zfit').onclick=()=>{fitView();needsRender();};
-  window.addEventListener('resize',()=>{if(S.view==='editor'){sizeCanvases();fitView();needsRender();}});
+  window.addEventListener('resize',()=>{if(S.view==='editor'){sizeCanvases();if(fsEl())fitView();needsRender();}}); /* no unconditional fitView(): a mobile address-bar / keyboard resize used to snap the zoom back to "fit" mid-gesture; the stage ResizeObserver keeps the view centred */
   document.addEventListener('keydown',e=>{if(S.view!=='editor')return;const t=e.target.tagName;if(t==='INPUT'||t==='SELECT'||t==='TEXTAREA')return;const k=e.key.toLowerCase();
     if(e.key===' '){spaceDown=true;e.preventDefault();return;}
     if((e.ctrlKey||e.metaKey)&&k==='z'){e.preventDefault();e.shiftKey?redo():undo();return;}if((e.ctrlKey||e.metaKey)&&k==='y'){e.preventDefault();redo();return;}
@@ -1759,39 +1783,11 @@ function initRailDrag(r){if(r._drag)return;r._drag=1;const wrap=$('#stagewrap'),
     const collides=()=>dragObstacleRects(W,r,8).some(o=>rectsOverlap(12+pos.x*tw,12+pos.y*th,R.width,R.height,o.l,o.t,o.w,o.h));
     if(collides()){const x0=pos.x;let ok=false;for(const nx of[1,.75]){pos.x=nx;if(!collides()){ok=true;break;}}if(!ok){pos.x=x0;for(const ny of[0,1,.25,.75,.5]){pos.y=ny;if(!collides())break;}}apply();}
   });
-  let d=null;
-  r.addEventListener('pointerdown',e=>{const g=e.target.closest&&e.target.closest('.rgrip');if(!g||(e.pointerType==='mouse'&&e.button!==0))return;
-    e.preventDefault();const R=r.getBoundingClientRect(),W=wrap.getBoundingClientRect();
-    d={id:e.pointerId,x:e.clientX,y:e.clientY,fx:pos.x,fy:pos.y,tw:W.width-24-R.width,th:W.height-24-R.height,sx:12+pos.x*(W.width-24-R.width),sy:12+pos.y*(W.height-24-R.height),cx:e.clientX,cy:e.clientY};
-    try{g.setPointerCapture(e.pointerId);}catch(_){}r.classList.add('dragging');d.raf=requestAnimationFrame(follow);});
-  r.addEventListener('pointermove',e=>{if(d&&e.pointerId===d.id){d.cx=e.clientX;d.cy=e.clientY;}});
-  /* runs every frame while the rail is held, so it keeps catching up after the finger stops. It never jumps: each frame it
-     moves at most a fixed distance toward where the finger wants it, sliding along any overlay edge on whichever axis is free. */
-  const follow=()=>{if(!d)return;
-    const W=wrap.getBoundingClientRect(),R=r.getBoundingClientRect(),tw=W.width-24-R.width,th=W.height-24-R.height;
-    if(tw>0&&th>0){
-      const nx=d.tw>0?clamp(d.fx+(d.cx-d.x)/d.tw,0,1):pos.x,ny=d.th>0?clamp(d.fy+(d.cy-d.y)/d.th,0,1):pos.y;
-      const tx=12+nx*tw,ty=12+ny*th;
-      const obs=dragObstacleRects(W,r,8);
-      const blockedAt=(l,t)=>obs.some(o=>rectsOverlap(l,t,R.width,R.height,o.l,o.t,o.w,o.h));
-      let sx=d.sx,sy=d.sy,budget=18;
-      for(let i=0;i<80&&budget>0.01;i++){
-        const dx=tx-sx,dy=ty-sy,dist=Math.hypot(dx,dy);if(dist<0.5)break;
-        const st=Math.min(2,budget,dist),ux=dx/dist*st,uy=dy/dist*st;
-        let moved=false;
-        if(!blockedAt(sx+ux,sy+uy)){sx+=ux;sy+=uy;moved=true;}
-        else if(Math.abs(ux)>0.01&&!blockedAt(sx+ux,sy)){sx+=ux;moved=true;}
-        else if(Math.abs(uy)>0.01&&!blockedAt(sx,sy+uy)){sy+=uy;moved=true;}
-        if(!moved)break;
-        budget-=st;
-      }
-      sx=clamp(sx,12,12+tw);sy=clamp(sy,12,12+th);
-      d.sx=sx;d.sy=sy;
-      pos.x=clamp((sx-12)/tw,0,1);pos.y=clamp((sy-12)/th,0,1);apply();
-    }
-    d.raf=requestAnimationFrame(follow);};
-  const end=e=>{if(!d||e.pointerId!==d.id)return;cancelAnimationFrame(d.raf);d=null;r.classList.remove('dragging');lsSet('fb.railPos',{x:pos.x,y:pos.y});};
-  r.addEventListener('pointerup',end);r.addEventListener('pointercancel',end);}
+  makeOverlayDrag({host:r,el:r,wrap,margin:12,buffer:8,
+    accept:e=>e.target.closest&&e.target.closest('.rgrip'),
+    start:()=>r.classList.add('dragging'),
+    write:(x,y,W,R)=>{const tw=W.width-24-R.width,th=W.height-24-R.height;if(tw>0)pos.x=clamp((x-12)/tw,0,1);if(th>0)pos.y=clamp((y-12)/th,0,1);apply();},
+    end:(x,y,W,moved)=>{r.classList.remove('dragging');if(moved)lsSet('fb.railPos',{x:pos.x,y:pos.y});}});}
 function buildRail(){const r=$('#rail');if(!r._tb)r._tb=['#t-prev','#t-play','#t-next'].map(id=>$(id));r.innerHTML='<span class="rgrip" title="Drag to move the tool bar" aria-label="Drag to move the tool bar"></span><button class="rcol" type="button" aria-label="Collapse tool bar" aria-expanded="true"><span class="chev2"></span></button>';initRailDrag(r);
   {const cb=$('.rcol',r),sync=()=>{const c=r.classList.contains('collapsed');cb.setAttribute('aria-expanded',String(!c));cb.setAttribute('aria-label',c?'Expand tool bar':'Collapse tool bar');cb.title=cb.getAttribute('aria-label');};
     cb.onclick=()=>{const c=!r.classList.contains('collapsed');if(c)closeOpts();r.classList.toggle('collapsed',c);lsSet('fb.railCollapsed',c);sync();};sync();}
@@ -1933,15 +1929,53 @@ function dragObstacleRects(wrapRect,exceptEl,bufferPx){
   }).filter(r=>r.w>bufferPx*2&&r.h>bufferPx*2); // skip hidden overlays (0×0 rect, e.g. a closed #optbar)
 }
 function rectsOverlap(l1,t1,w1,h1,l2,t2,w2,h2){return l1<l2+w2&&l1+w1>l2&&t1<t2+h2&&t1+h1>t2;}
-// Slide a dragged overlay around obstacles instead of freezing on contact: keep whichever axis is still
-// free (so the toolbar keeps following the finger along an obstacle's edge), else stop at the closest
-// free point on the path from where it is now to where the finger wants it.
-function slideAroundObstacles(tx,ty,cx,cy,blocked){
-  if(!blocked(tx,ty))return{x:tx,y:ty};
-  const c=[];if(!blocked(tx,cy))c.push({x:tx,y:cy});if(!blocked(cx,ty))c.push({x:cx,y:ty});
-  if(c.length){c.sort((a,b)=>Math.hypot(a.x-tx,a.y-ty)-Math.hypot(b.x-tx,b.y-ty));return c[0];}
-  let lo=0,hi=1;for(let i=0;i<10;i++){const m=(lo+hi)/2;if(blocked(cx+(tx-cx)*m,cy+(ty-cy)*m))hi=m;else lo=m;}
-  return{x:cx+(tx-cx)*lo,y:cy+(ty-cy)*lo};
+/* ---- Floating-toolbar drag engine, shared by the tool rail and the zoom pill ----------------------------------------
+   The dragged toolbar's wanted spot is always "where the finger is, minus where it was grabbed". That spot is resolved against
+   the other overlays (grown by a gap) with an axis-separated SWEPT test starting from the last valid position:
+     - it can never tunnel through another toolbar (a fast drag used to teleport the pill clean across the rail),
+     - on each axis it only ever moves TOWARD the finger, so it can't creep or slide the opposite way while blocked,
+     - it slides along the face of whatever it is pressed against, and rounds the corner once the finger clears it.
+   A speed cap makes it glide (not pop) to the finger after being held back. */
+const DRAG_EPS=.5;
+function resolveDragMove(cur,want,size,b,obstacles){
+  const w=size.w,h=size.h;
+  const cx=clamp(cur.x,b.minX,b.maxX),cy=clamp(cur.y,b.minY,b.maxY),wx=clamp(want.x,b.minX,b.maxX),wy=clamp(want.y,b.minY,b.maxY);
+  // an overlay we already overlap (it resized under us, or we were saved on top of it) must not freeze the drag
+  const live=obstacles.filter(o=>!rectsOverlap(cx,cy,w,h,o.l,o.t,o.w,o.h));
+  const sweepX=(x0,y,x1)=>{let x=x1;
+    for(const o of live){if(!(y<o.t+o.h&&y+h>o.t))continue;
+      if(x1>x0){if(o.l>=x0+w-DRAG_EPS)x=Math.min(x,o.l-w);}else if(x1<x0){if(o.l+o.w<=x0+DRAG_EPS)x=Math.max(x,o.l+o.w);}}
+    return x1>x0?Math.max(x,x0):x1<x0?Math.min(x,x0):x;};
+  const sweepY=(x,y0,y1)=>{let y=y1;
+    for(const o of live){if(!(x<o.l+o.w&&x+w>o.l))continue;
+      if(y1>y0){if(o.t>=y0+h-DRAG_EPS)y=Math.min(y,o.t-h);}else if(y1<y0){if(o.t+o.h<=y0+DRAG_EPS)y=Math.max(y,o.t+o.h);}}
+    return y1>y0?Math.max(y,y0):y1<y0?Math.min(y,y0):y;};
+  const ax=sweepX(cx,cy,wx),ay=sweepY(ax,cy,wy);      // horizontal first
+  const by=sweepY(cx,cy,wy),bx=sweepX(cx,by,wx);      // vertical first
+  return Math.hypot(ax-wx,ay-wy)<=Math.hypot(bx-wx,by-wy)+.01?{x:ax,y:ay}:{x:bx,y:by};
+}
+function makeOverlayDrag(o){
+  const GLIDE=3200; // px/s the toolbar may travel to catch up with the finger after being held back
+  let d=null;
+  const finish=()=>{if(!d)return;const s=d;d=null;cancelAnimationFrame(s.raf);o.end(s.x,s.y,o.wrap.getBoundingClientRect(),s.moved);};
+  const frame=now=>{if(!d)return;d.raf=requestAnimationFrame(frame);
+    const W=o.wrap.getBoundingClientRect(),R=o.el.getBoundingClientRect(),w=R.width,h=R.height;
+    const b={minX:o.margin,maxX:Math.max(o.margin,W.width-w-o.margin),minY:o.margin,maxY:Math.max(o.margin,W.height-h-o.margin)};
+    const want={x:clamp(d.fx-W.left-d.gx,b.minX,b.maxX),y:clamp(d.fy-W.top-d.gy,b.minY,b.maxY)};
+    const dt=clamp((now-d.t)/1000,.008,.05);d.t=now;
+    const dx=want.x-d.x,dy=want.y-d.y,dist=Math.hypot(dx,dy),lim=GLIDE*dt,tgt=dist>lim?{x:d.x+dx*lim/dist,y:d.y+dy*lim/dist}:want;
+    const next=resolveDragMove({x:d.x,y:d.y},tgt,{w,h},b,dragObstacleRects(W,o.el,o.buffer)),step=Math.hypot(next.x-d.x,next.y-d.y);
+    if(step>.01){d.x=next.x;d.y=next.y;o.write(d.x,d.y,W,R);}
+    if(d.released&&(Math.hypot(want.x-d.x,want.y-d.y)<.5||step<.01))finish();};   // after release it keeps gliding until it arrives (or is pressed flush against something)
+  o.host.addEventListener('pointerdown',e=>{const g=o.accept(e);if(!g||(e.pointerType==='mouse'&&e.button!==0))return;
+    if(d&&!d.released)return;if(d)finish();
+    e.preventDefault();const W=o.wrap.getBoundingClientRect(),R=o.el.getBoundingClientRect();
+    d={id:e.pointerId,fx:e.clientX,fy:e.clientY,sx:e.clientX,sy:e.clientY,gx:e.clientX-R.left,gy:e.clientY-R.top,x:R.left-W.left,y:R.top-W.top,t:performance.now(),moved:false,released:false};
+    try{g.setPointerCapture(e.pointerId);}catch(_){}
+    o.start(e);d.raf=requestAnimationFrame(frame);});
+  o.host.addEventListener('pointermove',e=>{if(!d||d.released||e.pointerId!==d.id)return;d.fx=e.clientX;d.fy=e.clientY;if(Math.hypot(e.clientX-d.sx,e.clientY-d.sy)>3)d.moved=true;});
+  const release=e=>{if(d&&!d.released&&e.pointerId===d.id)d.released=true;};
+  o.host.addEventListener('pointerup',release);o.host.addEventListener('pointercancel',release);o.host.addEventListener('lostpointercapture',release);
 }
 // Zoom pill expand/collapse. When expanding would run past the bottom of the canvas, the pill's bottom
 // grows into the free space and pushes its top edge up just enough to stay inside; collapsing glides it
@@ -1988,7 +2022,7 @@ function initStagebtnsDrag(zb){
     let left=clamp(leftFrac*wr.width,MARGIN,maxL),top=clamp(topFrac*wr.height,MARGIN,maxT);
     if(hitsObstacle(wr,left,top,er.width,er.height)){
       const cl=er.left-wr.left,ct=er.top-wr.top,blocked=(l,t)=>hitsObstacle(wr,l,t,er.width,er.height);
-      if(curLeft!=null&&!blocked(cl,ct)){const sl=slideAroundObstacles(left,top,cl,ct,blocked);left=clamp(sl.x,MARGIN,maxL);top=clamp(sl.y,MARGIN,maxT);place(left,top);return{left,top,wr};}
+      if(curLeft!=null&&!blocked(cl,ct)){const sl=resolveDragMove({x:cl,y:ct},{x:left,y:top},{w:er.width,h:er.height},{minX:MARGIN,maxX:maxL,minY:MARGIN,maxY:maxT},dragObstacleRects(wr,zb,BUFFER));left=sl.x;top=sl.y;place(left,top);return{left,top,wr};}
       // First-ever placement happens to collide (e.g. a position saved before this fix existed).
       // Hunt along the top edge, then the right edge, for the first clear spot instead of freezing.
       let placed=false;
@@ -2000,29 +2034,11 @@ function initStagebtnsDrag(zb){
   };
   const saved=lsGet('fb.stagebtnsPos',null);
   if(saved&&typeof saved.lf==='number'&&typeof saved.tf==='number')clampAndPlace(saved.lf,saved.tf);
-  let drag=null;
-  grip.addEventListener('pointerdown',e=>{
-    cancelZoomPillAnim(zb);zb._zcOrigin=null;
-    const er=zb.getBoundingClientRect(),wr0=wrap.getBoundingClientRect();curLeft=er.left-wr0.left;curTop=er.top-wr0.top;
-    drag={id:e.pointerId,ox:e.clientX-er.left,oy:e.clientY-er.top};
-    zb.classList.add('dragging');
-    grip.setPointerCapture(e.pointerId);
-    e.preventDefault();
-  });
-  grip.addEventListener('pointermove',e=>{
-    if(!drag||e.pointerId!==drag.id)return;
-    const wr=wrap.getBoundingClientRect();
-    const{left,top}=clampAndPlace((e.clientX-wr.left-drag.ox)/wr.width,(e.clientY-wr.top-drag.oy)/wr.height);
-    drag.lf=left/wr.width;drag.tf=top/wr.height;
-  });
-  const endDrag=e=>{
-    if(!drag||(e&&e.pointerId!==drag.id))return;
-    zb.classList.remove('dragging');
-    if(typeof drag.lf==='number')lsSet('fb.stagebtnsPos',{lf:drag.lf,tf:drag.tf});
-    drag=null;
-  };
-  grip.addEventListener('pointerup',endDrag);
-  grip.addEventListener('pointercancel',endDrag);
+  makeOverlayDrag({host:grip,el:zb,wrap,margin:MARGIN,buffer:BUFFER,
+    accept:()=>grip,
+    start:()=>{cancelZoomPillAnim(zb);zb._zcOrigin=null;zb.classList.add('dragging');},
+    write:(x,y)=>place(x,y),
+    end:(x,y,W,moved)=>{zb.classList.remove('dragging');if(moved)lsSet('fb.stagebtnsPos',{lf:x/W.width,tf:y/W.height});}});
   window.addEventListener('resize',()=>{
     const pos=lsGet('fb.stagebtnsPos',null);
     if(pos&&typeof pos.lf==='number')clampAndPlace(pos.lf,pos.tf);
@@ -2582,14 +2598,52 @@ async function renderHome(){
 /* ===== 3D character editor (parametric mannequin) ===== */
 let CH=null;const CHG={ready:false};
 const BACKDROPS=[['#e8ecf2','Powder grey'],['#d6f2e6','Mint'],['#e4dbf7','Lavender'],['#fde0cf','Peach'],['#d3e8fb','Sky'],['#fbf1c4','Butter'],['#f8d9e4','Blush'],['#dfeccf','Sage']];
-function sunVec(){return new THREE.Vector3(-0.5,0.72,0.48).normalize();}
-const HATCH_VS=`attribute float aThin;varying float vThin;varying vec3 vN;void main(){vThin=aThin;vN=normalize(mat3(modelMatrix)*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`;
+function sunVec(){return new THREE.Vector3(-0.58,0.66,0.48).normalize();}
+/* Whole-body lighting. Every torso/neck/head mesh is its own ellipsoid, so lighting each by its own normals makes every part its own little ball
+   (separate terminators on chest, abdomen, pelvis and head). For those parts the shading normal is instead taken from ONE capsule running from the
+   pelvis centre to the head centre: the direction from the nearest point on that axis to the surface point. All of them then share a single light
+   gradient, so the shadow runs unbroken down the whole back. aGlob (0..1) is how much of the part's own normal is replaced (limbs keep 0). */
+const GLOB_DECL=`#ifdef GLOBAL_LIGHT
+attribute float aGlob;uniform vec3 uSegA;uniform vec3 uSegB;
+vec3 globalN(vec3 wp,vec3 pn,float k){vec3 ab=uSegB-uSegA;float t=clamp(dot(wp-uSegA,ab)/max(dot(ab,ab),1e-6),0.0,1.0);vec3 d=wp-(uSegA+ab*t);float l=length(d);vec3 g=l>1e-4?d/l:pn;
+vec3 ax=ab/max(length(ab),1e-4);float a=clamp(dot(pn,ax),-1.0,1.0);vec3 r=g-ax*dot(g,ax);float rl=length(r);r=rl>1e-4?r/rl:pn-ax*a;rl=length(r);r=rl>1e-4?r/rl:r;
+vec3 gn=r*sqrt(max(0.0,1.0-a*a))+ax*a;return normalize(mix(pn,gn,k));}
+#endif
+#ifdef SHADOWED
+uniform mat4 uShM;uniform vec3 uShL;uniform float uShN;varying vec4 vSh;
+vec4 shadowCoord(vec3 wp,vec3 wn){float nl=clamp(dot(wn,uShL),0.0,1.0);return uShM*vec4(wp+wn*uShN*(1.5+2.5*(1.0-nl)),1.0);}
+#endif
+`;
+/* fragment side of the part-to-part shadows: a packed-RGBA depth map rendered from the sun, sampled with a 3x3 filter */
+const SHADOW_FS=`#ifdef SHADOWED
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp sampler2D;
+#endif
+uniform sampler2D uShT;uniform float uShOn;uniform float uShB;uniform float uShK;varying vec4 vSh;
+float shadowVis(){if(uShOn<0.5)return 1.0;vec3 s=vSh.xyz/vSh.w*0.5+0.5;float vis=0.0;
+for(int i=-1;i<=1;i++){for(int j=-1;j<=1;j++){vec4 tx=texture2D(uShT,s.xy+vec2(float(i),float(j))*uShK);float d=dot(tx,vec4(1.0,1.0/255.0,1.0/65025.0,1.0/16581375.0));vis+=((s.z-uShB)<=d)?1.0:0.0;}}
+return vis/9.0;}
+#endif
+`;
+const GV=s=>'#define GLOBAL_LIGHT\n'+s;
+const HATCH_VS=GLOB_DECL+`attribute float aThin;varying float vThin;varying vec3 vN;void main(){vThin=aThin;vN=normalize(mat3(modelMatrix)*normal);
+#ifdef GLOBAL_LIGHT
+vN=globalN((modelMatrix*vec4(position,1.0)).xyz,vN,aGlob);
+#endif
+#ifdef SHADOWED
+vSh=shadowCoord((modelMatrix*vec4(position,1.0)).xyz,normalize(mat3(modelMatrix)*normal));
+#endif
+gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`;
 /* toon band edges are anti-aliased with screen-space derivatives and on thin parts (fingers, toes) the bands blend into one smooth gradient instead of stepping */
 const TOON_EDGE=`float edge(float d,float c){float w=mix(max(fwidth(d),0.006),0.5,vThin);return smoothstep(c-w,c+w,d);}`;
-const HATCH_HEAD=`uniform vec3 uLight;uniform vec3 uBase;uniform vec3 uInk;uniform vec3 uMid;uniform vec3 uAccent;uniform vec3 uDeep;uniform float uPx;varying vec3 vN;varying float vThin;float shadeOf(){float t=clamp(dot(normalize(vN),normalize(uLight))*0.5+0.5,0.0,1.0);return clamp((0.6-t)/0.35,0.0,1.0);}float h2(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}`;
+const HATCH_HEAD=SHADOW_FS+`uniform vec3 uLight;uniform vec3 uBase;uniform vec3 uInk;uniform vec3 uMid;uniform vec3 uAccent;uniform vec3 uDeep;uniform float uPx;varying vec3 vN;varying float vThin;float shadeOf(){float nl=dot(normalize(vN),normalize(uLight));float t=clamp(nl*0.5+0.5,0.0,1.0);
+#ifdef SHADOWED
+t=min(t,mix(0.22,1.0,mix(1.0,shadowVis(),smoothstep(0.0,0.3,nl))));
+#endif
+return clamp((0.6-t)/0.35,0.0,1.0);}float h2(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}`;
 /* halftone: 45-degree Ben-Day screen. Dot area follows shadow depth, edges are anti-aliased, and each dot gets a
    little random size jitter so the screen reads as printed rather than mathematically perfect */
-const HATCH_HALF=`void main(){float d=shadeOf();vec2 p=mat2(0.7071,-0.7071,0.7071,0.7071)*gl_FragCoord.xy/uPx;vec2 c=floor(p);vec2 q=fract(p)-0.5;float jit=(h2(c)-0.5)*0.12;float dd=clamp(d+jit,0.0,1.0);float r=0.75*smoothstep(0.0,0.92,dd);float ink=1.0-smoothstep(r-0.04,r+0.04,length(q));gl_FragColor=vec4(mix(uBase,uInk,ink),1.0);}`;
+const HATCH_HALF=`void main(){float d=shadeOf();vec2 p=mat2(0.7071,-0.7071,0.7071,0.7071)*gl_FragCoord.xy/uPx;vec2 c=floor(p);vec2 q=fract(p)-0.5;float jit=(h2(c)-0.5)*0.12;float dd=clamp(d+jit,0.0,1.0);float r=0.75*smoothstep(0.0,0.92,dd);float ink=1.0-smoothstep(r-0.04,r+0.04,length(q));gl_FragColor=vec4(mix(uBase,uDeep,ink),1.0);}`;
 /* stippling: one dot per cell, present with probability = darkness, dot size grows with darkness */
 const SHADE_STIPPLE=`void main(){float d=shadeOf();vec2 p=gl_FragCoord.xy/uPx;float ink=0.0;for(int L=0;L<2;L++){vec2 pp=p+(L==0?vec2(0.0):vec2(0.5,0.5));vec2 c=floor(pp);vec2 f=fract(pp)-0.5;float thr=L==0?d:clamp(d*2.0-0.5,0.0,1.0);vec2 j=(vec2(h2(c+vec2(13.1,7.7)),h2(c+vec2(3.3,19.9)))-0.5)*0.4;float on=step(h2(c+vec2(3.3,9.1)+vec2(float(L)*5.0)),thr);float r=mix(0.12,0.3,d)*(0.8+0.4*h2(c+vec2(5.5,1.7)));ink=max(ink,on*step(length(f-j),r));}gl_FragColor=vec4(mix(uBase,uInk,ink),1.0);}`;
 /* circling: small loose loops, one per cell, more of them where the form is darker */
@@ -2606,13 +2660,27 @@ const SHADE_TOON3D=TOON_EDGE+`void main(){float d=shadeOf();vec3 c=mix(mix(uBase
 /* brush strokes: each stroke runs along the surface contour (from the screen-space normal), takes its own tone band,
    and carries fine bristle streaks, so the model reads as painted rather than rendered */
 const SHADE_BRUSH=`varying vec2 vDir;float vn(vec2 p){vec2 i=floor(p);vec2 f=fract(p);vec2 u=f*f*(3.0-2.0*f);return mix(mix(h2(i),h2(i+vec2(1.0,0.0)),u.x),mix(h2(i+vec2(0.0,1.0)),h2(i+vec2(1.0,1.0)),u.x),u.y);}void main(){float d=shadeOf();vec2 dir=mix(vec2(0.7071,0.7071),normalize(vDir+vec2(1e-6)),smoothstep(0.02,0.25,length(vDir)));vec2 perp=vec2(-dir.y,dir.x);vec2 g=gl_FragCoord.xy/uPx;float x=dot(g,perp);float a=dot(g,dir);float w=vn(vec2(x*0.35,a*0.08)+3.0)-0.5;float grain=vn(vec2(x*0.9,a*0.12)+7.0)-0.5;float fine=vn(vec2(x*2.2,a*0.25)+11.0)-0.5;float dv=clamp(d+w*0.35+grain*0.22+fine*0.08,0.0,1.0);float band=dv<0.3?0.0:(dv<0.65?1.0:2.0);float e=max(1.0-smoothstep(0.0,0.03,abs(dv-0.3)),1.0-smoothstep(0.0,0.03,abs(dv-0.65)));vec3 c=band<0.5?uBase:(band<1.5?uMid:uDeep);c*=(1.0+fine*0.25+grain*0.1)*(1.0-0.12*e);gl_FragColor=vec4(c,1.0);}`;
-const HATCH_VS2=`attribute float aThin;varying float vThin;varying vec3 vN;varying vec2 vDir;void main(){vThin=aThin;vN=normalize(mat3(modelMatrix)*normal);vDir=(normalMatrix*normal).xy;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`;
+const HATCH_VS2=GLOB_DECL+`attribute float aThin;varying float vThin;varying vec3 vN;varying vec2 vDir;void main(){vThin=aThin;vN=normalize(mat3(modelMatrix)*normal);
+#ifdef GLOBAL_LIGHT
+vN=globalN((modelMatrix*vec4(position,1.0)).xyz,vN,aGlob);
+#endif
+#ifdef SHADOWED
+vSh=shadowCoord((modelMatrix*vec4(position,1.0)).xyz,normalize(mat3(modelMatrix)*normal));
+#endif
+vDir=(normalMatrix*normal).xy;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`;
 
 /* ===== painted styles. Everything is derived per pixel from the surface itself: the screen-space change of the normal gives the form's
    principal direction (strokes run along limbs and creases), the gradient of the light gives the contour direction (strokes wrap around
    volumes), and the sign of the mean curvature tells ridges from cuts. Move any slider and the geometry changes, so the strokes bend with it. ===== */
-const PAINT_VS=`attribute float aThin;varying float vThin;varying vec3 vN;varying vec3 vV;varying vec3 vP;void main(){vThin=aThin;vN=normalize(mat3(modelMatrix)*normal);vV=normalize(normalMatrix*normal);vec4 mv=modelViewMatrix*vec4(position,1.0);vP=mv.xyz;gl_Position=projectionMatrix*mv;}`;
-const PAINT_HEAD=`uniform vec3 uLight;uniform vec3 uBase;uniform vec3 uInk;uniform vec3 uMid;uniform vec3 uAccent;uniform vec3 uDeep;uniform float uPx;
+const PAINT_VS=GLOB_DECL+`attribute float aThin;varying float vThin;varying vec3 vN;varying vec3 vV;varying vec3 vP;void main(){vThin=aThin;vN=normalize(mat3(modelMatrix)*normal);vV=normalize(normalMatrix*normal);
+#ifdef GLOBAL_LIGHT
+vN=globalN((modelMatrix*vec4(position,1.0)).xyz,vN,aGlob);vV=normalize(mat3(viewMatrix)*vN);
+#endif
+#ifdef SHADOWED
+vSh=shadowCoord((modelMatrix*vec4(position,1.0)).xyz,normalize(mat3(modelMatrix)*normal));
+#endif
+vec4 mv=modelViewMatrix*vec4(position,1.0);vP=mv.xyz;gl_Position=projectionMatrix*mv;}`;
+const PAINT_HEAD=SHADOW_FS+`uniform vec3 uLight;uniform vec3 uBase;uniform vec3 uInk;uniform vec3 uMid;uniform vec3 uAccent;uniform vec3 uDeep;uniform float uPx;
 varying vec3 vN;varying vec3 vV;varying vec3 vP;varying float vThin;
 float h2(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 vec2 h22(vec2 p){return vec2(h2(p),h2(p+vec2(41.7,17.3)));}
@@ -2622,6 +2690,9 @@ vec2 gDir=vec2(1.0,0.0);vec2 gGrad=vec2(0.0);float gAni=0.0;float gConv=0.0;floa
 void analyze(){
   vec3 L=normalize(uLight);vec3 n=normalize(vN);
   gLight=clamp(dot(n,L)*0.5+0.5,0.0,1.0);
+#ifdef SHADOWED
+  gLight=min(gLight,mix(0.22,1.0,mix(1.0,shadowVis(),smoothstep(0.0,0.3,dot(n,L)))));
+#endif
   vec3 nv=normalize(vV);vec3 nx=dFdx(nv);vec3 ny=dFdy(nv);
   float a=dot(nx,nx);float b=dot(nx,ny);float c=dot(ny,ny);
   float ang=0.5*atan(2.0*b+1e-9,a-c+1e-9);
@@ -2696,6 +2767,52 @@ void main(){analyze();vec2 p=gl_FragCoord.xy/uPx;
   col*=0.93+0.14*(vn(p*2.7)*0.6+vn(p*7.3)*0.4);
   float bl=smoothstep(0.62,0.8,fbm(q*0.7+3.0));col=mix(col,uBase,bl*0.25);
   gl_FragColor=vec4(accents(col,0.35),1.0);}
+#elif STYLE==6
+void main(){analyze();vec2 p=gl_FragCoord.xy/uPx;
+  float t=gLight+clamp(gConv*0.1,-0.2,0.2);
+  vec3 s1=strokes(p*0.24,gDir,1.7,0.2,1.0,0.0,0.22);
+  vec3 s2=strokes(p*0.5+4.7,gDir,1.6,0.13,5.0,0.0,0.35);
+  vec3 s3=strokes(p*1.3+9.0,gDir,1.8,0.055,8.0,0.0,0.2);
+  float tm=t+sg(s1)*0.045+sg(s2)*0.025;
+  float ew=max(fwidth(tm)*1.2,0.004);
+  float deep=1.0-smoothstep(0.35-ew,0.35+ew,tm);float mid=1.0-smoothstep(0.6-ew,0.6+ew,tm);
+  vec3 col=mix(uBase,uMid,mid);
+  col=mix(col,uDeep,deep);
+  col*=1.0+s1.x*s1.y*0.13+s2.x*s2.y*0.08;
+  col=mix(col,mix(col,uBase,0.55),s3.x*(1.0-deep)*0.35*step(0.5,s3.z));
+  mat2 R=mat2(0.7071,-0.7071,0.7071,0.7071);
+  vec2 g=R*p*0.78;vec2 q=fract(g)-0.5;float dl=length(q);float aw=max(fwidth(dl),0.03);
+  float dark=clamp((0.74-tm)/0.42,0.0,1.0);
+  float r=0.66*sqrt(dark);
+  float dotm=(1.0-smoothstep(r-aw,r+aw,dl))*step(0.02,dark);
+  col=mix(col,uInk,dotm*(1.0-deep)*0.78);
+  vec2 q2=fract(R*(p+vec2(1.3,0.8))*0.78+vec2(0.5,0.5))-0.5;float d2=length(q2);float aw2=max(fwidth(d2),0.03);
+  float m2=(1.0-smoothstep(0.2-aw2,0.2+aw2,d2))*deep;
+  col=mix(col,uAccent,m2*0.8);
+  col=accents(col,0.55);
+  float a=mix(0.8,0.94,deep);
+  gl_FragColor=vec4(col,a);}
+#elif STYLE==7
+void main(){analyze();vec2 p=gl_FragCoord.xy/uPx;
+  float t=gLight+clamp(gConv*0.1,-0.2,0.2);
+  vec3 s1=strokes(p*0.5,gDir,1.1,0.2,1.0,0.0,0.3);
+  vec3 s2=strokes(p*1.15+4.7,gDir,1.0,0.15,5.0,0.0,0.45);
+  float tm=t+s1.x*s1.y*0.12+s2.x*s2.y*0.07;
+  float ew=max(fwidth(tm)*1.2,0.004);
+  float deep=1.0-smoothstep(0.35-ew,0.35+ew,tm);float mid=1.0-smoothstep(0.6-ew,0.6+ew,tm);
+  float deep2=1.0-smoothstep(0.35-ew,0.35+ew,tm+dot(gGrad,vec2(1.6,-1.1)*uPx));
+  vec3 col=mix(uBase,uMid,mid);
+  col=mix(col,uAccent,clamp(deep2-deep,0.0,1.0)*0.85);
+  col=mix(col,uDeep,deep);
+  col*=1.0+s2.x*s2.y*0.12+s1.x*s1.y*0.09;
+  vec3 h=strokes(p*0.9,gDir,1.1,0.07,4.0,0.0,0.12);
+  float dens=1.0-smoothstep(0.1,0.38,tm);
+  col=mix(col,uInk,deep*h.x*step(h.z,dens*0.9+0.15)*0.8);
+  vec2 q=fract(mat2(0.9659,-0.2588,0.2588,0.9659)*p*1.1)-0.5;
+  float dt=step(length(q),0.46*clamp((0.63-tm)/0.26,0.0,1.0))*mid*(1.0-deep);
+  col=mix(col,uDeep,dt*0.6);
+  col=accents(col,0.5);
+  gl_FragColor=vec4(col,1.0);}
 #else
 void main(){analyze();vec2 p=gl_FragCoord.xy/uPx;
   float t=gLight+clamp(gConv*0.08,-0.15,0.15);
@@ -2716,7 +2833,7 @@ void main(){analyze();vec2 p=gl_FragCoord.xy/uPx;
 `;
 const PAINT_PAL={skin:[0xf6d9c4,0xe0a08c,0x5b4a86,0xff7fa8],jade:[0x9fdc8a,0x62b072,0x1d2b5c,0xffe27a],clay:[0xeadbc4,0xc9a98a,0x4d3f5e,0xff9a6a],dusk:[0xffc9de,0xa58be0,0x2c2870,0x16d6d6]};
 const PAINTED=['paint','lines','scribbles','water','verse'];
-function posebase(){return {lean:[0,0],drop:0,arms:{L:{sh:[0,0,0],el:0,elTw:0,ik:'',wr:[0,0,0],fc:20,tc:20,pt:0},R:{sh:[0,0,0],el:0,elTw:0,ik:'',wr:[0,0,0],fc:20,tc:20,pt:0}},legs:{L:{hip:[0,0],knee:0,ik:null,flat:true},R:{hip:[0,0],knee:0,ik:null,flat:true}}};}
+function posebase(){return {prop:'',lean:[0,0],drop:0,arms:{L:{sh:[0,0,0],el:0,elTw:0,ik:'',wr:[0,0,0],fc:20,tc:20,pt:0},R:{sh:[0,0,0],el:0,elTw:0,ik:'',wr:[0,0,0],fc:20,tc:20,pt:0}},legs:{L:{hip:[0,0],knee:0,ik:null,flat:true},R:{hip:[0,0],knee:0,ik:null,flat:true}}};}
 /* wr = wrist bend (+ toward the palm), tilt, hand roll; fc = finger curl 0-100%; pt = 1 keeps the index finger straight (pointing). sh[0] forward swing (+ forward), sh[1] raise out to the side; el bends the elbow forward; hip[0] forward, hip[1] out; knee bends the calf backward */
 /* leg placement for planted/lifted feet, measured in thigh lengths: x out from the hip, z forward, lift off the floor; pitch in degrees (+ toes down, - toes up) */
 const IKL=(x,z,lift,pitch)=>({ik:{x:x||0,z:z||0,lift:lift||0,pitch:pitch||0}});
@@ -2731,17 +2848,17 @@ const POSE_PRESETS=[
 ['hips','Hands on hips',{arms:{L:{ik:'hip',fc:30,tc:15,wr:[10,0,0]},R:{ik:'hip',fc:30,tc:15,wr:[10,0,0]}}}],
 ['headhands','Hands on head',{arms:{L:{ik:'head',fc:35,tc:40,wr:[12,0,0]},R:{ik:'head',fc:35,tc:40,wr:[12,0,0]}}}],
 ['crossed','Arms crossed',{arms:{L:{ik:'chest',fc:55,tc:35,wr:[15,0,0]},R:{ik:'chest',fc:55,tc:35,wr:[15,0,0]}}}],
-['hipraise','Hand on hip, other arm up',{arms:{L:{ik:'hip',fc:30,tc:15,wr:[10,0,0]},R:{ik:'raise',fc:10,tc:15,wr:[-8,0,0]}}}],
 ['wave','Wave',{arms:{R:{ik:'wave',fc:0,tc:10,wr:[0,0,20]}}}],
 ['point','Pointing',{lean:[3,0],arms:{R:{sh:[82,6],fc:95,tc:85,pt:1,wr:[-10,0,0]}}}],
 ['think','Thinking',{lean:[4,0],arms:{R:{ik:'chin',fc:45,tc:20,wr:[20,0,0]},L:{ik:'waist',fc:25,tc:15,wr:[5,0,0]}}}],
-['sit','Sitting',{lean:[-4,0],drop:1,arms:{L:{sh:[10,0],el:30,fc:20,tc:15,wr:[10,0,0]},R:{sh:[10,0],el:30,fc:20,tc:15,wr:[10,0,0]}},legs:{L:IKL(.1,.97,0),R:IKL(.1,.97,0)}}],
-['leap','Mid-jump',{lean:[-6,0],drop:-.7,arms:{L:{sh:[150,10],fc:70,tc:65,wr:[15,0,0]},R:{sh:[150,10],fc:70,tc:65,wr:[15,0,0]}},legs:{L:{hip:[20,0],knee:50,flat:false},R:{hip:[20,0],knee:50,flat:false}}}],
+['sit','Sitting',{prop:'chair',lean:[-4,0],drop:1,arms:{L:{sh:[10,0],el:30,fc:20,tc:15,wr:[10,0,0]},R:{sh:[10,0],el:30,fc:20,tc:15,wr:[10,0,0]}},legs:{L:IKL(.1,.97,0),R:IKL(.1,.97,0)}}],
+/* a stride leap: the left leg reaches forward and out, the right trails behind, and the arms oppose the legs (right arm up and forward, left arm swept back and out) so it reads from the front as well as the side */
+['leap','Mid-jump',{lean:[12,0],drop:-1,arms:{L:{sh:[-48,60],el:30,fc:40,tc:30,wr:[0,0,0]},R:{sh:[104,34],el:14,fc:20,tc:15,wr:[0,0,0]}},legs:{L:{hip:[66,22],knee:24,flat:false},R:{hip:[-40,22],knee:80,flat:false}}}],
 ['jumpwind','Jump: anticipation',{lean:[38,0],drop:.72,arms:{L:{sh:[-55,8],el:10,fc:45,tc:30,wr:[25,0,0]},R:{sh:[-55,8],el:10,fc:45,tc:30,wr:[25,0,0]}},legs:{L:IKL(.2,.58,0),R:IKL(.2,.58,0)}}],
 ['hero','Hero stance',{lean:[4,0],arms:{L:{ik:'hip',fc:85,tc:70,wr:[15,0,0]},R:{ik:'hip',fc:85,tc:70,wr:[15,0,0]}},legs:{L:IKL(.5,0,0),R:IKL(.5,0,0)}}],
 ['fight','Fighting stance',{lean:[8,0],drop:.15,arms:{L:{sh:[60,0],el:110,fc:100,tc:90,wr:[20,0,0]},R:{sh:[60,0],el:110,fc:100,tc:90,wr:[20,0,0]}},legs:{L:IKL(.12,.5,0),R:IKL(.2,-.38,0)}}],
-['cast','Spell cast',{lean:[-3,0],drop:.08,arms:{L:{sh:[70,0],el:30,fc:25,tc:10,wr:[-30,0,0]},R:{sh:[70,0],el:30,fc:25,tc:10,wr:[-30,0,0]}},legs:{L:IKL(.15,.15,0),R:IKL(.2,-.2,0)}}],
-['kick','Kick',{lean:[-12,0],arms:{L:{sh:[25,35],el:30,fc:70,tc:55,wr:[15,0,0]},R:{sh:[-20,40],el:25,fc:70,tc:55,wr:[15,0,0]}},legs:{L:IKL(.02,0,0),R:IKL(.02,.95,.45,-30)}}],
+['cast','Spell cast',{prop:'cast',lean:[-3,0],drop:.08,arms:{L:{ik:'book',fc:6,tc:10,wr:[-12,0,0]},R:{ik:'clutch',fc:95,tc:85,wr:[0,0,0]}},legs:{L:IKL(.15,.15,0),R:IKL(.2,-.2,0)}}],
+['kick','Kick',{prop:'ball',lean:[-12,0],arms:{L:{sh:[25,35],el:30,fc:70,tc:55,wr:[15,0,0]},R:{sh:[-20,40],el:25,fc:70,tc:55,wr:[15,0,0]}},legs:{L:IKL(.02,0,0),R:IKL(.02,.95,.45,-30)}}],
 ['victory','Victory',{lean:[-6,0],arms:{L:{sh:[160,20],fc:100,tc:90,wr:[-10,0,0]},R:{sh:[160,20],fc:100,tc:90,wr:[-10,0,0]}}}]];
 
 function charDefaultRig(){const arm=()=>({up:3.2,lo:2.9,upR:.5,loR:.4}),leg=()=>({thigh:4.5,calf:4.3,thR:.85,caR:.6});
@@ -2752,7 +2869,7 @@ function charDefaultRig(){const arm=()=>({up:3.2,lo:2.9,upR:.5,loR:.4}),leg=()=>
     arm:{angle:14,taper:.8,L:arm(),R:arm()},hand:{len:1.2,w:.7,t:.35,fingers:5,fLen:1.1,fR:.08,spread:0,segs:2,curl:0,
       thumb:{len:.4,r:1,baseX:.52,baseY:.38,baseZ:.15,rotX:0,rotZ:0,curl:0}},
     leg:{taper:.8,L:leg(),R:leg()},foot:{len:1.9,w:.9,h:.7,toes:5,tl:.45,tR:.07},
-    pose:posebase(),view:{fill:'paint',palette:'skin',line:'black',weight:.07,guides:false,bones:false,ortho:true,backdrop:'#e8ecf2',sun:'soft'}};}
+    pose:posebase(),view:{fill:'paint',palette:'skin',line:'black',weight:.07,guides:false,bones:false,ortho:true,backdrop:'#e8ecf2',sun:'soft',shadows:true}};}
 function charMerge(base,src){if(!src||typeof src!=='object')return base;for(const k of Object.keys(base)){const b=base[k],s=src[k];if(b&&typeof b==='object')charMerge(b,s);else if(s!==undefined&&typeof s===typeof b)base[k]=s;}return base;}
 const CHAR_PARTS=[['head','Head'],['neck','Neck'],['chest','Chest / ribcage'],['abdomen','Abdomen'],['pelvis','Pelvis'],['upperArm','Upper arms'],['foreArm','Forearms'],['hand','Hands'],['thigh','Thighs'],['calf','Calves'],['foot','Feet'],['fingers','Fingers'],['thumbs','Thumbs'],['fingernails','Fingernails'],['toes','Toes'],['toenails','Toenails']];
 const CHAR_SL={
@@ -2789,9 +2906,22 @@ function armTarget(kind,s,g,L,uy){const V=THREE.Vector3,shX=s*(g.shoulder.span/2
   case 'chest':return{T:new V(-s*g.chest.w*.18,uy(L.chestY+g.chest.h*.05),L.chestZ+g.chest.d*.52+.3+(s>0?0:.55)),pole:new V(s,-.6,.4),hd:new V(-s,.15,-.2),pd:new V(0,0,-1)};
   case 'raise':return{T:new V(s*(g.shoulder.span*.5+1.2),uy(L.headY+L.hr*2.6),0),pole:new V(s,0,-1),pd:new V(0,0,1)};
   case 'wave':return{T:new V(shX+s*3,shY+2.8,.3),pole:new V(s,-.7,-.2),pd:new V(0,0,1)};
-  case 'chin':return{T:new V(s*g.head.w*.3,uy(L.headY-L.hr*.8),g.head.d*1.15+.2),pole:new V(s,-.6,.1),hd:new V(-s*.3,.9,-.3),pd:new V(0,0,-1)};
+  case 'book':return{T:new V(shX-s*1.3,shY-2.7,L.chestZ+2.7),pole:new V(s*.15,-1,-.45),hd:new V(-s*.1,.2,1),pd:new V(0,1,0)};
+  case 'clutch':return{T:new V(-s*.05,uy(L.chestY+g.chest.h*.2),L.chestZ+g.chest.d*.5+.5),pole:new V(s*1.1,-.5,-.2),hd:new V(-s*.55,.75,-.15),pd:new V(0,0,-1)};
+  case 'chin':return{T:new V(s*g.head.w*.22,uy(L.headY-L.hr*1.05)-.45,g.head.d*.95+.55),pole:new V(s*.7,-1,.15),hd:new V(-s*.2,.8,-.55),pd:new V(0,0,-1)};
   case 'waist':return{T:new V(-s*.4,uy(L.abdY),g.abdomen.d*.5+.5),pole:new V(s,-.5,.3),hd:new V(-s,0,0),pd:new V(0,0,-1)};
   default:return{T:new V(s*(g.pelvis.w/2+.1),uy(L.pelvisY+g.pelvis.h*.3),-.05),pole:new V(s,0,-1),hd:new V(0,-.75,.65),pd:new V(-s,0,0)};}}
+/* arm IK that cannot go through the body: the wrist, hand and fingers are pushed out of the head and torso, and the elbow is steered away by turning the pole */
+function armIKSafe(P,T0,a,b,pole0,hd,body,rr){const V=THREE.Vector3,T=T0.clone(),pole=pole0.clone();let sol=armIK(P,T,a,b,pole);
+  const out=(q,r)=>{let best=null;body.forEach(([c,rx,ry,rz])=>{const X=rx+r,Y=ry+r,Z=rz+r,dx=(q.x-c.x)/X,dy=(q.y-c.y)/Y,dz=(q.z-c.z)/Z,nd=dx*dx+dy*dy+dz*dz;
+      if(nd<1&&(!best||nd<best.nd)){const n=Math.sqrt(Math.max(nd,1e-8)),k=1/n-1;best={nd,push:new V(dx*X*k,dy*Y*k,dz*Z*k),nrm:new V(dx/X,dy/Y,dz/Z).normalize()};}});return best;};
+  for(let it=0;it<16;it++){
+    const E=P.clone().add(sol.D1.clone().multiplyScalar(a)),W=E.clone().add(sol.D2.clone().multiplyScalar(b)),hdn=(hd||sol.D2).clone().normalize(),
+      um=P.clone().add(sol.D1.clone().multiplyScalar(a*.55)),fm=E.clone().add(sol.D2.clone().multiplyScalar(b*.5));let bent=false,moved=false;
+    [[um,rr.up,0],[E,rr.up,0],[fm,rr.lo,0]].forEach(([q,r])=>{const o=out(q,r);if(o){pole.add(o.nrm.multiplyScalar(.7));bent=true;}});
+    [[W.clone().add(hdn.clone().multiplyScalar(rr.hl*.45)),rr.hw],[W.clone().add(hdn.clone().multiplyScalar(rr.hl*.9)),rr.hw*.8],[W.clone().add(hdn.clone().multiplyScalar(rr.hl*.78+rr.fl*.55)),rr.fr*2.5]].forEach(([q,r])=>{const o=out(q,r);if(o){T.add(o.push.multiplyScalar(1.02));moved=true;}});
+    if(!bent&&!moved)break;sol=armIK(P,T,a,b,pole);}
+  sol.T=T;return sol;}
 function armIK(P,T,a,b,pole){const V=THREE.Vector3;const v=T.clone().sub(P);const d=Math.max(1e-4,Math.min(v.length(),a+b-1e-3));const u=v.clone().normalize();
   const cosA=(a*a+d*d-b*b)/(2*a*d),sinA=Math.sqrt(Math.max(0,1-cosA*cosA));
   const pp=pole.clone().sub(u.clone().multiplyScalar(pole.dot(u)));const perp=pp.lengthSq()>1e-8?pp.normalize():new V(1,0,0).cross(u).normalize();
@@ -2804,9 +2934,9 @@ function charBuild(){
      code was. Any finger beyond the 4th now reuses the 'Pinky' name — a duplicate bone name, but one that actually
      receives real pinky motion data instead of sitting frozen under a name nothing ever animates */
   const bn=(name,x,y,z)=>{const b=new T.Bone();b.name=name;if(x!==undefined)b.position.set(x,y,z);return b;},FN=['Index','Middle','Ring','Pinky'];
-  const mesh=(geo,x,y,z,smooth,ink,thin)=>{geo.computeBoundingBox();const b=geo.boundingBox,hx=Math.max(1e-3,(b.max.x-b.min.x)/2),hy=Math.max(1e-3,(b.max.y-b.min.y)/2),hz=Math.max(1e-3,(b.max.z-b.min.z)/2),pos=geo.attributes.position,n=new Float32Array(pos.count*3),v=new T.Vector3();
+  const mesh=(geo,x,y,z,smooth,ink,thin,glob)=>{geo.computeBoundingBox();const b=geo.boundingBox,hx=Math.max(1e-3,(b.max.x-b.min.x)/2),hy=Math.max(1e-3,(b.max.y-b.min.y)/2),hz=Math.max(1e-3,(b.max.z-b.min.z)/2),pos=geo.attributes.position,n=new Float32Array(pos.count*3),v=new T.Vector3();
     for(let i=0;i<pos.count;i++){v.set(pos.getX(i)/hx,pos.getY(i)/hy,pos.getZ(i)/hz).normalize();n[i*3]=v.x;n[i*3+1]=v.y;n[i*3+2]=v.z;}
-    geo.setAttribute('outN',new T.BufferAttribute(n,3));geo.setAttribute('aThin',new T.BufferAttribute(new Float32Array(pos.count).fill(thin?1:0),1));if(smooth)geo.setAttribute('normal',new T.BufferAttribute(n.slice(),3));
+    geo.setAttribute('outN',new T.BufferAttribute(n,3));geo.setAttribute('aThin',new T.BufferAttribute(new Float32Array(pos.count).fill(thin?1:0),1));geo.setAttribute('aGlob',new T.BufferAttribute(new Float32Array(pos.count).fill(glob||0),1));if(smooth)geo.setAttribute('normal',new T.BufferAttribute(n.slice(),3));
     const m=new T.Mesh(geo,CHG.fillMat);m.position.set(x||0,y||0,z||0);if(ink!==false)m.add(new T.Mesh(geo,CHG.lineMat));CH.geos.push(geo);return m;};
   const ell=(rx,ry,rz)=>{const s=new T.SphereGeometry(1,24,16);s.scale(rx,ry,rz);return s;},cyl=(rt,rb,h)=>new T.CylinderGeometry(rt,rb,h,20,1),
     /* capsule: tapered tube with hemispherical ends, one smooth surface. Neighbouring segments share a ball joint, so there are no flat end caps to catch a band */
@@ -2818,17 +2948,18 @@ function charBuild(){
   const S1P=new T.Vector3(0,L.abdY-L.hipY,L.absZ),SP=new T.Vector3(0,L.chestY-L.hipY,L.chestZ);
   const S1=bn('Spine1',S1P.x,S1P.y,S1P.z),S2=bn('Spine2',SP.x-S1P.x,SP.y-S1P.y,SP.z-S1P.z);UP.add(S1);S1.add(S2);
   const uy=y=>y-L.hipY;
-  if(P.pelvis)HIPS.add(mesh(ell(g.pelvis.w/2,g.pelvis.h/2,g.pelvis.d/2),0,uy(L.pelvisY),0,true));
-  if(P.abdomen)UP.add(mesh(ell(g.abdomen.w/2,g.abdomen.h/2,g.abdomen.d/2),0,uy(L.abdY),L.absZ,true));
-  if(P.chest)UP.add(mesh(ell(g.chest.w/2,g.chest.h/2,g.chest.d/2),0,uy(L.chestY),L.chestZ,true));
+  if(P.pelvis)HIPS.add(mesh(ell(g.pelvis.w/2,g.pelvis.h/2,g.pelvis.d/2),0,uy(L.pelvisY),0,true,true,false,1));
+  if(P.abdomen)UP.add(mesh(ell(g.abdomen.w/2,g.abdomen.h/2,g.abdomen.d/2),0,uy(L.abdY),L.absZ,true,true,false,1));
+  if(P.chest)UP.add(mesh(ell(g.chest.w/2,g.chest.h/2,g.chest.d/2),0,uy(L.chestY),L.chestZ,true,true,false,1));
   const npY=uy(L.chestTop-.2),NG=bn('Neck');NG.position.set(0,npY-SP.y,L.chestZ*.7-SP.z);NG.rotation.x=-rad(pz.lean[0]*.6);S2.add(NG);
-  if(P.neck){const y0=L.chestTop-.35,y1=L.headY-L.hr+.25;NG.add(mesh(cyl(g.neck.r*.95,g.neck.r,y1-y0),0,uy((y0+y1)/2)-npY,0));}
+  if(P.neck){const y0=L.chestTop-.35,y1=L.headY-L.hr+.25;NG.add(mesh(cyl(g.neck.r*.95,g.neck.r,y1-y0),0,uy((y0+y1)/2)-npY,0,false,true,false,1));}
   const HB=bn('Head',0,uy(L.headY-L.hr)-npY,0);NG.add(HB);
-  if(P.head)HB.add(mesh(charHeadGeom(g.head),0,L.hr,L.chestZ*.6-L.chestZ*.7,true));
+  if(P.head)HB.add(mesh(charHeadGeom(g.head),0,L.hr,L.chestZ*.6-L.chestZ*.7,true,true,false,1));
+  const anc={},bodyEll=[[new T.Vector3(0,uy(L.chestY),L.chestZ),g.chest.w/2*1.02,g.chest.h/2*1.02,g.chest.d/2*1.08],[new T.Vector3(0,uy(L.abdY),L.absZ),g.abdomen.w/2*1.02,g.abdomen.h/2*1.02,g.abdomen.d/2*1.08],[new T.Vector3(0,uy(L.pelvisY),0),g.pelvis.w/2*1.02,g.pelvis.h/2*1.02,g.pelvis.d/2*1.08],[new T.Vector3(0,uy(L.headY),L.chestZ*-.1),g.head.w*1.04,1.15*g.head.h*1.04,1.1*g.head.d*1.04],[new T.Vector3(0,uy(L.chestTop+g.neck.len*.45),L.chestZ*.7),g.neck.r*1.05,g.neck.len*.6+.2,g.neck.r*1.05]];
   [['L',1],['R',-1]].forEach(([k,s])=>{
     const nm=s>0?'Left':'Right',a=g.arm[k],A=pz.arms[k],cl=bn(nm+'Shoulder'),ag=bn(nm+'Arm'),P0=new T.Vector3(s*(g.shoulder.span/2+g.anchor.arm.x),uy(L.chestTop-g.shoulder.drop+g.anchor.arm.y),L.chestZ+g.anchor.arm.z);let sol=null;
     cl.position.copy(P0).sub(SP);
-    if(A.ik){const tg=armTarget(A.ik===true||A.ik===1?'hip':A.ik,s,g,L,uy);sol=armIK(P0,tg.T,a.up,a.lo,tg.pole);sol.hd=tg.hd;sol.pd=tg.pd;}
+    if(A.ik){const tg=armTarget(A.ik===true||A.ik===1?'hip':A.ik,s,g,L,uy);sol=armIKSafe(P0,tg.T,a.up,a.lo,tg.pole,tg.hd,bodyEll,{up:a.upR*1.1,lo:Math.max(a.loR,a.upR*g.arm.taper)*1.1,hw:g.hand.w*.7,hl:g.hand.len,fl:g.hand.fLen*(1-(A.fc||0)/100*.6),fr:g.hand.fR});sol.hd=tg.hd;sol.pd=tg.pd;}
     if(sol){ag.quaternion.setFromUnitVectors(new T.Vector3(0,-1,0),sol.D1);}else{ag.rotation.set(-rad(A.sh[0]),0,s*rad(g.arm.angle+A.sh[1]));}
     S2.add(cl);cl.add(ag);const tw=bn(nm+'ArmRoll');if(!sol)tw.rotation.y=rad(A.sh[2]||0);ag.add(tw);
     if(P.upperArm){ag.add(mesh(ell(a.upR*1.12,a.upR*1.12,a.upR*1.12),0,0,0,true));tw.add(mesh(cyl(a.upR,a.upR*g.arm.taper,a.up),0,-a.up/2,0));}
@@ -2846,7 +2977,7 @@ function charBuild(){
       let pushed=handC.clone(),moved=false;
       for(let pass=0;pass<2;pass++)torsoParts.forEach(([c,rx,ry,rz])=>{const dx=(pushed.x-c.x)/rx,dy=(pushed.y-c.y)/ry,dz=(pushed.z-c.z)/rz,nd=dx*dx+dy*dy+dz*dz;
         if(nd<1&&nd>1e-6){const kk=(1/Math.sqrt(nd))*1.04;pushed.set(c.x+dx*rx*kk,c.y+dy*ry*kk,c.z+dz*rz*kk);moved=true;}});
-      if(moved)hg.position.add(pushed.clone().sub(handC).applyQuaternion(chainQ.clone().invert()));}
+      if(moved)hg.position.add(pushed.clone().sub(handC).applyQuaternion(chainQ.clone().invert()));anc[k]=moved?pushed.clone():handC.clone();}
     {const ax=(x,y,z,d)=>new T.Quaternion().setFromAxisAngle(new T.Vector3(x,y,z),rad(d)),w=A.wr||[0,0,0],wq=ax(0,1,0,w[2]).multiply(ax(1,0,0,w[0])).multiply(ax(0,0,1,w[1]));
       if(sol){const inv=ag.quaternion.clone().multiply(fg.quaternion).invert(),hdL=(sol.hd||sol.D2).clone().normalize().applyQuaternion(inv),q1=new T.Quaternion().setFromUnitVectors(new T.Vector3(0,-1,0),hdL),
           pL=(sol.pd||new T.Vector3(-s,0,0)).clone().applyQuaternion(inv),pl=pL.clone().sub(hdL.clone().multiplyScalar(pL.dot(hdL)));
@@ -2886,8 +3017,124 @@ function charBuild(){
     if(P.foot)fg2.add(mesh(new T.BoxGeometry(g.foot.w,g.foot.h,g.foot.len),0,-g.foot.h/2,g.foot.len*.3));
     {const TB=bn(nm+'ToeBase',0,-g.foot.h*.35,g.foot.len*.8);fg2.add(TB);const n=Math.round(g.foot.toes);if(n>0){const TM=P.foot&&P.toes,tr=g.foot.tR,tl=g.foot.tl,sp=Math.max(g.foot.w*.8/Math.max(1,n-1),2.2*tr);for(let i=0;i<n;i++){const tg=bn(nm+'Toe'+(i+1));tg.position.set((i-(n-1)/2)*sp,0,0);tg.rotation.x=Math.PI/2;TB.add(tg);if(TM){tg.add(mesh(cap(tr,tr*.9,tl),0,tl/2,0,false,true,true));if(P.toenails)tg.add(mesh(ell(tr*.8,tr*.45,tr*.25),0,tl*.85,-tr*.75,true,true,true));}}}}
   });
+  propsBuild(pz.prop,{g,L,uy,UP,HIPS,root,anc,dropAbs});
   charBonesRefresh(true);if(CH.mocap&&CH.mocap.on&&CH.mocap.retargeted&&!CH.mocapSuspend)mocapApply(!CH.mocap.playing);
 }
+/* ===== pose props: implied, see-through objects (translucent cell-shaded fill + coloured outline) =====
+   They attach to the figure's own bones, so they follow the pose, and they are drawn after the body so the figure never hides them. */
+function ghostMats(color){CHG.propMats=CHG.propMats||{};if(CHG.propMats[color])return CHG.propMats[color];const T=THREE;
+  const c=new T.Color(color),hsl={};c.getHSL(hsl);
+  /* the same painted look as the figure (arcane brush strokes, hard spider-verse cell shading with halftone dots), tinted from the prop's own colour and left see-through */
+  const fillMat=new T.ShaderMaterial({uniforms:{uLight:{value:CHG.sunDir.clone()},uBase:{value:c.clone().lerp(new T.Color(0xffffff),.5)},uInk:{value:new T.Color(0x2d2a55)},uMid:{value:c.clone()},uAccent:{value:new T.Color().setHSL((hsl.h+.5)%1,.9,.62)},uDeep:{value:c.clone().multiplyScalar(.5).lerp(new T.Color(0x2c2870),.2)},uPx:{value:4*(CHG.renderer.getPixelRatio()||1)}},
+    vertexShader:PAINT_VS,fragmentShader:'#define STYLE 6\n'+PAINT_HEAD+PAINT_MAIN,transparent:true,depthWrite:true,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:1,side:T.DoubleSide});
+  return CHG.propMats[color]={
+    fill:fillMat,
+    dark:new T.MeshBasicMaterial({color:c.clone().multiplyScalar(.45),transparent:true,opacity:.55,depthWrite:false,side:T.DoubleSide})};}
+/* ink used by every prop: a thick outline (an inverted hull pushed out along the surface, the same trick and the same line colour and weight slider as the figure)
+   plus thin crease lines. Parts that are thin get a proportionally thinner outline so a slim cover or a chain link does not turn into a black blob */
+function propInk(){if(CHG.propInk)return CHG.propInk;const T=THREE,v=(CH&&CH.rig&&CH.rig.view)||{},col=new T.Color({black:0x000000,blue:0x2d5bff,red:0xe5383b}[v.line]||0);
+  const lineMat=a=>new T.ShaderMaterial({uniforms:{uColor:{value:col.clone()},uA:{value:a}},vertexShader:'void main(){gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',fragmentShader:'uniform vec3 uColor;uniform float uA;void main(){gl_FragColor=vec4(uColor,uA);}',transparent:true,depthWrite:false});
+  return CHG.propInk={outline:new T.ShaderMaterial({uniforms:{uW:{value:v.weight||.07},uColor:{value:col.clone()}},side:T.BackSide,transparent:true,depthWrite:false,
+    vertexShader:'attribute vec3 outN;attribute float aK;uniform float uW;void main(){vec3 p=position+normalize(outN)*uW*aK;gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.0);}',
+    fragmentShader:'uniform vec3 uColor;void main(){gl_FragColor=vec4(uColor,1.0);}'}),edge:lineMat(.9),soft:lineMat(.35)};}
+function propPrep(geo,cap){if(geo.attributes.outN)return geo;const T=THREE;geo.computeBoundingBox();const b=geo.boundingBox,ex=b.max.x-b.min.x,ey=b.max.y-b.min.y,ez=b.max.z-b.min.z,hx=Math.max(1e-3,ex/2),hy=Math.max(1e-3,ey/2),hz=Math.max(1e-3,ez/2),pos=geo.attributes.position,n=new Float32Array(pos.count*3),v=new T.Vector3();
+  for(let i=0;i<pos.count;i++){v.set(pos.getX(i)/hx,pos.getY(i)/hy,pos.getZ(i)/hz).normalize();n[i*3]=v.x;n[i*3+1]=v.y;n[i*3+2]=v.z;}
+  const k=Math.min(cap||1,Math.max(.3,Math.min(1,Math.min(ex,ey,ez)*7)));
+  geo.setAttribute('outN',new T.BufferAttribute(n,3));geo.setAttribute('aK',new T.BufferAttribute(new Float32Array(pos.count).fill(k),1));return geo;}
+/* one implied solid: cell-shaded translucent body (hard tone bands, brush strokes, halftone dots), an ink outline, and crease lines on top */
+function ghost(geo,color,o){o=o||{};const T=THREE,M=ghostMats(color),I=propInk(),g=new T.Group();CH.geos.push(geo);
+  const f=new T.Mesh(geo,M.fill);f.renderOrder=6;g.add(f);
+  if(o.hull!==false){const h=new T.Mesh(propPrep(geo,o.ol),I.outline);h.renderOrder=8;g.add(h);}
+  const eg=new T.EdgesGeometry(geo,o.angle||30);CH.geos.push(eg);const e=new T.LineSegments(eg,I.edge);e.renderOrder=9;g.add(e);
+  g.userData.prop=true;return g;}
+const ghostBox=(w,h,d,x,y,z,color,o)=>{const T=THREE,gr=ghost(new T.BoxGeometry(w,h,d),color,o);gr.position.set(x,y,z);return gr;};
+function ghostLines(pts,color,soft){const T=THREE,M=ghostMats(color),geo=new T.BufferGeometry().setFromPoints(pts);CH.geos.push(geo);const I=propInk(),l=new T.LineSegments(geo,soft?I.soft:I.edge);l.renderOrder=9;l.userData.prop=true;return l;}
+/* a thick hardbound book: covers, rounded spine with raised bands, a page block with every page edge drawn, an emblem and a ribbon.
+   Built with the spine on -x and the front cover on +z; (bw wide, bh tall, bt thick) */
+function propBook(color,bw,bh,bt){const T=THREE,G=new T.Group(),cov=.07,sp=bt/2,cw=bw-sp,cx=-bw/2+sp+cw/2;
+  G.add(ghostBox(cw,bh,cov,cx,0,-bt/2+cov/2,color),ghostBox(cw,bh,cov,cx,0,bt/2-cov/2,color));
+  const mk=(r,h,y)=>{const c=ghost(new T.CylinderGeometry(r,r,h,18,1,false,-Math.PI,Math.PI),color,{hull:r===sp?1.05:false,angle:20});c.position.set(-bw/2+sp,y,0);return c;};
+  G.add(mk(sp,bh,0));[-.36,-.18,0,.18,.36].forEach(k=>G.add(mk(sp+.035,.07,k*bh)));
+  const px0=-bw/2+sp+.02,px1=bw/2-.06,pw=px1-px0,ph=bh-.14,pt=bt-cov*2-.02;
+  G.add(ghostBox(pw,ph,pt,(px0+px1)/2,0,0,color,{hull:false}));
+  const pl=[],N=Math.max(18,Math.round(pt/.022));
+  for(let i=1;i<N;i++){const z=-pt/2+i/N*pt;pl.push(new T.Vector3(px1+.002,-ph/2+.02,z),new T.Vector3(px1+.002,ph/2-.02,z),new T.Vector3(px0+.1,ph/2+.002,z),new T.Vector3(px1,ph/2+.002,z),new T.Vector3(px0+.1,-ph/2-.002,z),new T.Vector3(px1,-ph/2-.002,z));}
+  G.add(ghostLines(pl,color,true));
+  /* front-cover frame, emblem and corner guards */
+  const zc=bt/2+.004,fx0=cx-cw/2+.2,fx1=cx+cw/2-.14,fy=bh/2-.16,fr=[[fx0,-fy],[fx1,-fy],[fx1,fy],[fx0,fy]],fp=[];
+  for(let i=0;i<4;i++){const a=fr[i],b=fr[(i+1)%4];fp.push(new T.Vector3(a[0],a[1],zc),new T.Vector3(b[0],b[1],zc));}
+  const ex=(fx0+fx1)/2,R1=Math.min(fx1-fx0,fy*2)*.3;for(let i=0;i<24;i++){const a=i/24*Math.PI*2,b=(i+1)/24*Math.PI*2;fp.push(new T.Vector3(ex+Math.cos(a)*R1,Math.sin(a)*R1,zc),new T.Vector3(ex+Math.cos(b)*R1,Math.sin(b)*R1,zc));}
+  for(let i=0;i<6;i++){const a=i/6*Math.PI*2,b=((i+2)%6)/6*Math.PI*2;fp.push(new T.Vector3(ex+Math.cos(a)*R1,Math.sin(a)*R1,zc),new T.Vector3(ex+Math.cos(b)*R1,Math.sin(b)*R1,zc));}
+  G.add(ghostLines(fp,color,false));
+  [[1,1],[1,-1]].forEach(([sx,sy])=>G.add(ghostBox(.2,.2,.03,cx+cw/2-.1,sy*(bh/2-.1),bt/2+.012,color,{hull:false})));
+  G.add(ghostBox(.06,.5,.012,cx+.1,-bh/2-.22,bt/2-.1,color,{hull:1.3}));
+  return G;}
+/* an OPEN book: spine along y at the middle, two cover halves fanned up, each with a page block, every page edge, and lines of script on the pages.
+   +z is the open face. hw = width of one half, bh = height, pt = page-block thickness */
+function propBookOpen(color,hw,bh,pt,fan){const T=THREE,G=new T.Group(),cov=.07;
+  const half=sx=>{const H=new T.Group(),pw=hw-.06,ph=bh-.14;
+    H.add(ghostBox(hw,bh,cov,hw/2,0,-pt-cov/2,color));
+    H.add(ghostBox(pw,ph,pt,pw/2+.02,0,-pt/2,color,{hull:false}));
+    const L=[],N=Math.round(pt/.022);
+    for(let i=1;i<N;i++){const z=-pt+i/N*pt;L.push(new T.Vector3(pw+.022,-ph/2+.02,z),new T.Vector3(pw+.022,ph/2-.02,z),new T.Vector3(.1,ph/2+.002,z),new T.Vector3(pw,ph/2+.002,z),new T.Vector3(.1,-ph/2-.002,z),new T.Vector3(pw,-ph/2-.002,z));}
+    /* script lines on the open page, and a slight page curl toward the spine */
+    for(let r=0;r<13;r++){const y=ph/2-.28-r*(ph-.6)/12,x1=pw-.16-(r%4===3?.5:0);L.push(new T.Vector3(.2,y,.004),new T.Vector3(x1,y,.004));}
+    L.push(new T.Vector3(.2,ph/2-.14,.004),new T.Vector3(.2+pw*.35,ph/2-.14,.004));
+    H.add(ghostLines(L,color,true));
+    H.scale.x=sx;H.rotation.y=-sx*fan;return H;};
+  /* rotation about the spine so each half rises toward the reader */
+  const A=half(1),B=half(-1);G.add(A,B);
+  const sp=ghost(new T.CylinderGeometry(.13,.13,bh,14),color,{hull:1.1,angle:20});sp.position.set(0,0,-pt-cov*.5);G.add(sp);
+  [-.36,-.18,0,.18,.36].forEach(k=>{const b=ghost(new T.CylinderGeometry(.16,.16,.06,14),color,{hull:false,angle:20});b.position.set(0,k*bh,-pt-cov*.5);G.add(b);});
+  G.add(ghostBox(.05,.5,.012,.1,-bh/2-.22,.01,color,{hull:1.3}));
+  return G;}
+/* crucifix pendant on a fine chain: links follow a curve from around the neck down to the pendant */
+function propCross(color,s){const T=THREE,G=new T.Group();
+  G.add(ghostBox(.15*s,.95*s,.08*s,0,0,0,color),ghostBox(.52*s,.14*s,.08*s,0,.22*s,0,color));
+  const ring=ghost(new T.TorusGeometry(.07*s,.02*s,6,12),color,{ol:.3});ring.position.set(0,.5*s,0);G.add(ring);
+  const gem=ghost(new T.OctahedronGeometry(.07*s),color,{ol:.3});gem.position.set(0,.22*s,.06*s);G.add(gem);return G;}
+function propChain(color,pts,link){const T=THREE,G=new T.Group(),curve=new T.CatmullRomCurve3(pts,false,'catmullrom',.5),n=Math.max(10,Math.round(curve.getLength()/link));
+  for(let i=0;i<=n;i++){const p=curve.getPoint(i/n),tg=curve.getTangent(i/n),l=ghost(new T.TorusGeometry(.055,.014,5,8),color,{ol:.22,angle:60});l.position.copy(p);
+    l.quaternion.setFromUnitVectors(new T.Vector3(0,0,1),tg.clone().normalize());l.rotateZ(i%2?Math.PI/2:0);l.scale.set(1,1.35,1);G.add(l);}
+  return G;}
+/* a soccer ball: truncated icosahedron, with its pentagons shaded in */
+function propBall(color,r){const T=THREE,G=new T.Group(),sph=ghost(new T.SphereGeometry(r,28,20),color,{hull:1.04,angle:90});G.add(sph);
+  const f=(1+Math.sqrt(5))/2,V=[];[[0,1,f],[0,1,-f],[0,-1,f],[0,-1,-f],[1,f,0],[1,-f,0],[-1,f,0],[-1,-f,0],[f,0,1],[f,0,-1],[-f,0,1],[-f,0,-1]].forEach(a=>V.push(new T.Vector3(...a)));
+  const nb=V.map((v,i)=>V.map((w,j)=>j!==i&&v.distanceTo(w)<2.01?j:-1).filter(j=>j>=0)),on=p=>p.clone().normalize().multiplyScalar(r*1.003),lines=[],fill=[];
+  V.forEach((v,i)=>{const n=v.clone().normalize(),u=new T.Vector3(1,0,0).cross(n).lengthSq()>.1?new T.Vector3(1,0,0).cross(n).normalize():new T.Vector3(0,1,0).cross(n).normalize(),w=n.clone().cross(u);
+    const ring=nb[i].map(j=>({p:on(V[i].clone().lerp(V[j],1/3)),a:Math.atan2(V[j].clone().sub(V[i]).dot(w),V[j].clone().sub(V[i]).dot(u))})).sort((a,b)=>a.a-b.a).map(o=>o.p),c=on(V[i]);
+    for(let k=0;k<5;k++){const a=ring[k],b=ring[(k+1)%5];lines.push(a,b);fill.push(c.x,c.y,c.z,a.x,a.y,a.z,b.x,b.y,b.z);}
+    nb[i].forEach(j=>{if(j>i)lines.push(on(V[i].clone().lerp(V[j],1/3)),on(V[i].clone().lerp(V[j],2/3)));});});
+  G.add(ghostLines(lines,color,false));
+  const fg=new T.BufferGeometry();fg.setAttribute('position',new T.BufferAttribute(new Float32Array(fill),3));CH.geos.push(fg);const fm=new T.Mesh(fg,ghostMats(color).dark);fm.renderOrder=7;fm.userData.prop=true;G.add(fm);return G;}
+/* a plain chair to sit on: seat, four legs, back posts, top rail and slats */
+function propChair(color,w,d,seatY,floorY,backH){const G=new THREE.Group(),h=seatY-floorY,t=.2;
+  G.add(ghostBox(w,.32,d,0,seatY-.16,0,color));
+  [[1,1],[-1,1],[1,-1],[-1,-1]].forEach(([sx,sz])=>G.add(ghostBox(t,h-.32,t,sx*(w/2-t/2-.05),floorY+(h-.32)/2,sz*(d/2-t/2-.05),color,{hull:1.12})));
+  [1,-1].forEach(sx=>G.add(ghostBox(t,backH,t,sx*(w/2-t/2-.05),seatY+backH/2,-(d/2-t/2-.05),color,{hull:1.12})));
+  G.add(ghostBox(w-.1,.34,.16,0,seatY+backH-.17,-(d/2-t/2-.05),color));
+  [-1,0,1].forEach(k=>G.add(ghostBox(.22,backH*.5,.1,k*w*.22,seatY+backH*.5,-(d/2-t/2-.05),color,{hull:1.12})));
+  return G;}
+/* builds whichever prop set the pose names. ctx carries the figure's measurements and the spots the arms ended up */
+function propsBuild(kind,ctx){const T=THREE,{g,L,uy,UP,HIPS,root,anc,dropAbs}=ctx;if(!kind||(CH.mocap&&CH.mocap.on&&!CH.mocapSuspend))return;
+  if(kind==='cast'){
+    const hL=CH.j.wL;if(hL){/* the book rests on the palm: palm side is -z in the hand's frame, so the lowest point of the spine (-.485 in the book's own frame) is set a hair above the palm surface, and the book spans from just below the wrist to past the fingertips so the forearm, hand and fingers never poke through it */
+    const b=propBookOpen('#9b6bff',1.45,2.5,.32,.3),h=new T.Group();b.rotation.y=Math.PI;b.position.set(0,0,-(.485+g.hand.t/2+.03));h.add(b);h.position.set(0,-(g.hand.len*.2+1.25),0);hL.add(h);}
+    const hc=anc.R;if(hc){const cp=hc.clone().add(new T.Vector3(0,.2,-.22)),cross=propCross('#ffc233',1.55);cross.position.copy(cp);UP.add(cross);
+      const yn=uy(L.chestTop)+.05,zn=L.chestZ*.7,rr=g.neck.r*1.55+.12,pts=[];
+      for(let i=0;i<=8;i++){const a=Math.PI*.5+i/8*Math.PI*2*.5;pts.push(new T.Vector3(Math.cos(a)*rr,yn+.1,zn-Math.sin(a)*rr*.9));}
+      /* front half: from the right side of the neck down to the pendant and back up to the left side */
+      const sideR=new T.Vector3(-rr,yn+.1,zn),sideL=new T.Vector3(rr,yn+.1,zn),top=cp.clone().add(new T.Vector3(0,.8,0));
+      const half=[];for(let i=0;i<=7;i++){const a=Math.PI*.5+i/7*Math.PI;half.push(new T.Vector3(Math.cos(a)*rr,yn+.1,zn-Math.sin(a)*rr*.9));}
+      const front=[sideR,sideR.clone().lerp(top,.35).add(new T.Vector3(0,-.12,.18)),sideR.clone().lerp(top,.7).add(new T.Vector3(0,-.05,.25)),top,sideL.clone().lerp(top,.7).add(new T.Vector3(0,-.05,.25)),sideL.clone().lerp(top,.35).add(new T.Vector3(0,-.12,.18)),sideL];
+      UP.add(propChain('#ffc233',half,.14),propChain('#ffc233',front,.14));}
+  }else if(kind==='ball'){
+    const ft=CH.j.aR;if(ft){const r=g.foot.len*.68,b=propBall('#2ec4b6',r);b.position.set(0,r*.6,g.foot.len*.85+r*.8);ft.add(b);}
+  }else if(kind==='chair'){
+    const seatY=L.hipY-g.leg.L.thR*.98,floorY=dropAbs;root.add(propChair('#e8873a',g.pelvis.w*1.35,g.pelvis.d*1.6,seatY,floorY,4.4));
+    root.children[root.children.length-1].position.set(0,0,-.25);}
+}
+
 /* collects the named bones from the current build, makes a THREE.Skeleton, and (when switched on) draws a bone overlay */
 function charBonesRefresh(fresh){
   const T=THREE;if(!CH||!CHG.scene||!CHG.root)return;
@@ -3052,7 +3299,7 @@ function mocapSyncUI(){const m=CH&&CH.mocap;if(!m)return;const sl=document.getEl
 function mocapSeek(t){const m=CH&&CH.mocap;if(!m||!m.retargeted)return;m.playing=false;cancelAnimationFrame(m._raf);m.on=true;m.t=((t%m.duration)+m.duration)%m.duration;mocapApply(true);charDraw();mocapSyncUI();}
 function mocapToggle(){const m=CH&&CH.mocap;if(!m)return;m.playing=!m.playing;cancelAnimationFrame(m._raf);if(m.playing){m.on=true;m._lt=0;m._raf=requestAnimationFrame(mocapTick);}mocapSyncUI();}
 function mocapApply(snap){mocapApply0(snap);}
-function mocapApply0(snap){
+function mocapApply0(snap){if(CHG.root)CHG.root.traverse(o=>{if(o.userData&&o.userData.prop)o.visible=false;});
   const m=CH&&CH.mocap;if(!m||!CH.bones||!CH.boneList||!CH.boneList.length)return;
   const T=THREE,frame=m.src.sample(m.t),cur=frame.q;
   /* a loop wrap or a big time jump restarts the smoothing instead of sliding between far-apart poses */
@@ -3153,13 +3400,19 @@ function charApplyStyle(){
   const T=THREE,v=CH.rig.view;charApplyBackdrop();
   /* removed styles (hatching, pen and pencil) in older saved files fall back to Halftone */
   if(['cross','diag','stipple','circle','scumble','random','brush'].includes(v.fill))v.fill='halftone';
-  CHG.fillMat={flat:CHG.fillFlat,shaded:CHG.fillShade,halftone:CHG.fillHalf,verse:CHG.fillVerse,toon2:CHG.fillToon2,toon3:CHG.fillToon3,toonsoft:CHG.fillToonSoft,toon3d:CHG.fillToon3d,paint:CHG.fillPaint,lines:CHG.fillLines,scribbles:CHG.fillScrib,water:CHG.fillWater,brush:CHG.fillBrush,stipple:CHG.fillStipple,circle:CHG.fillCircle,scumble:CHG.fillScumble,random:CHG.fillRandom}[v.fill]||CHG.fillFlat;
+  /* the Smooth option was removed: older files that used it get the closest remaining look */
+  if(v.fill==='shaded')v.fill='toonsoft';
+  CHG.fillMat={flat:CHG.fillFlat,shaded:CHG.fillShade,halftone:CHG.fillHalf,verse:CHG.fillVerse,arcverse:CHG.fillArcVerse,toon2:CHG.fillToon2,toon3:CHG.fillToon3,toonsoft:CHG.fillToonSoft,toon3d:CHG.fillToon3d,paint:CHG.fillPaint,lines:CHG.fillLines,scribbles:CHG.fillScrib,water:CHG.fillWater,brush:CHG.fillBrush,stipple:CHG.fillStipple,circle:CHG.fillCircle,scumble:CHG.fillScumble,random:CHG.fillRandom}[v.fill]||CHG.fillFlat;
   const pr=CHG.renderer.getPixelRatio()||1,inkCol=({black:0x3a4252,blue:0x2d5bff,red:0xe5383b}[v.line]||0x111318);
   /* each style has its own mark size: dots and loops need a bigger cell than the halftone grid to read on screen */
-  [[CHG.fillHalf,2.4],[CHG.fillVerse,3.4],[CHG.fillPaint,5],[CHG.fillLines,4],[CHG.fillScrib,4.5],[CHG.fillWater,6],[CHG.fillBrush,3.2],[CHG.fillStipple,1.8],[CHG.fillCircle,3.2],[CHG.fillScumble,3],[CHG.fillRandom,2.4]].forEach(([m,cell])=>{m.uniforms.uPx.value=cell*pr;m.uniforms.uInk.value.set(inkCol);});
+  [[CHG.fillHalf,2.4],[CHG.fillVerse,3.4],[CHG.fillArcVerse,4],[CHG.fillPaint,5],[CHG.fillLines,4],[CHG.fillScrib,4.5],[CHG.fillWater,6],[CHG.fillBrush,3.2],[CHG.fillStipple,1.8],[CHG.fillCircle,3.2],[CHG.fillScumble,3],[CHG.fillRandom,2.4]].forEach(([m,cell])=>{m.uniforms.uPx.value=cell*pr;m.uniforms.uInk.value.set(inkCol);});
   const pal=PAINT_PAL[v.palette]||PAINT_PAL.skin;
-  [CHG.fillPaint,CHG.fillLines,CHG.fillScrib,CHG.fillWater,CHG.fillVerse].forEach(m=>{const u=m.uniforms;u.uBase.value.setHex(pal[0],T.LinearSRGBColorSpace);u.uMid.value.setHex(pal[1],T.LinearSRGBColorSpace);u.uDeep.value.setHex(pal[2],T.LinearSRGBColorSpace);u.uAccent.value.setHex(pal[3],T.LinearSRGBColorSpace);});
-  CHG.lineMat.uniforms.uColor.value.set({black:0x000000,blue:0x2d5bff,red:0xe5383b}[v.line]||0);CHG.lineMat.uniforms.uW.value=v.weight;}
+  /* the palette colours the model in EVERY shading style, not just the painted ones */
+  CHG.fillFlat.color.setHex(pal[0]);CHG.fillShade.color.setHex(pal[0]);
+  [CHG.fillPaint,CHG.fillLines,CHG.fillScrib,CHG.fillWater,CHG.fillVerse,CHG.fillArcVerse,CHG.fillHalf,CHG.fillToon2,CHG.fillToon3,CHG.fillToonSoft,CHG.fillToon3d,CHG.fillBrush,CHG.fillStipple,CHG.fillCircle,CHG.fillScumble,CHG.fillRandom].forEach(m=>{const u=m.uniforms;u.uBase.value.setHex(pal[0],T.LinearSRGBColorSpace);u.uMid.value.setHex(pal[1],T.LinearSRGBColorSpace);u.uDeep.value.setHex(pal[2],T.LinearSRGBColorSpace);u.uAccent.value.setHex(pal[3],T.LinearSRGBColorSpace);});
+  Object.values(CHG.propMats||{}).forEach(m=>{m.fill.uniforms.uPx.value=4*pr;m.fill.uniforms.uInk.value.set(inkCol);});
+  CHG.lineMat.uniforms.uColor.value.set({black:0x000000,blue:0x2d5bff,red:0xe5383b}[v.line]||0);CHG.lineMat.uniforms.uW.value=v.weight;
+  {const I=propInk();I.outline.uniforms.uW.value=v.weight;[I.outline,I.edge,I.soft].forEach(m=>m.uniforms.uColor.value.set({black:0x000000,blue:0x2d5bff,red:0xe5383b}[v.line]||0));}}
 function charCamUpdate(){
   const T=THREE,c=CH.cam,vp=$('#c-vp'),w=Math.max(1,vp.clientWidth),h=Math.max(1,vp.clientHeight),asp=w/h,yr=c.yaw*Math.PI/180,pr=c.pitch*Math.PI/180;
   const dir=new T.Vector3(Math.sin(yr)*Math.cos(pr),Math.sin(pr),Math.cos(yr)*Math.cos(pr)),tgt=new T.Vector3(c.tx,c.ty,c.tz);let cam;
@@ -3228,12 +3481,30 @@ function charBloomUpdate(){
   /* backlight: 1 when the sun is on the far side of the figure from the viewer, 0 when it is in front */
   const back=on?Math.max(0,Math.min(1,dz*1.6)):0;
   [CHG.bleedMat,CHG.bleedWide].forEach(m=>{m.uniforms.uSunV.value.set(dx/l,dy/l);m.uniforms.uBack.value=back;});}
-function charDraw(){if(!CH||!CHG.ready||CH.exporting)return;charCamUpdate();charBloomUpdate();if(CHG.root)CHG.root.updateMatrixWorld(true);charBoneVisUpdate();CHG.renderer.render(CHG.scene,CHG.cur);charSunDraw();charGuides();}
+/* the whole-body light axis: pelvis centre -> head centre, in world space, from the live bones (so lean, sitting and animation all carry it) */
+function charBodyLight(){
+  if(!CH||!CHG.bodyMats||!CH.bones||!CH.bones.Hips||!CH.bones.Head)return;
+  const L=charLayout(CH.rig),a=CH.bones.Hips.localToWorld(new THREE.Vector3(0,L.pelvisY-L.hipY,0)),b=CH.bones.Head.localToWorld(new THREE.Vector3(0,L.hr,0));
+  CHG.bodyMats.forEach(m=>{m.uniforms.uSegA.value.copy(a);m.uniforms.uSegB.value.copy(b);});}
+/* draws the figure from the sun into the shadow map. Fitted to the figure's live bounds each time, so poses, props and animation all cast. */
+function charShadowPass(){
+  if(!CH||!CHG.ready||!CHG.shU||!CHG.root)return;const T=THREE,U=CHG.shU;
+  if(CH.rig.view.shadows===false){U.On.value=0;return;}
+  CHG.root.updateMatrixWorld(true);const box=new T.Box3().setFromObject(CHG.root);if(box.isEmpty()){U.On.value=0;return;}
+  const c=box.getCenter(new T.Vector3()),R=Math.max(1,box.getSize(new T.Vector3()).length()/2*1.05),cam=CHG.shCam,rd=CHG.renderer,sc=CHG.scene,prev=rd.getRenderTarget(),bv=CHG.boneVis,bOn=bv&&bv.visible;
+  cam.left=-R;cam.right=R;cam.top=R;cam.bottom=-R;cam.near=R*.5;cam.far=R*2.5;cam.position.copy(c).addScaledVector(CHG.sunDir,R*1.5);cam.up.set(0,1,0);cam.lookAt(c);cam.updateProjectionMatrix();cam.updateMatrixWorld(true);
+  U.M.value.multiplyMatrices(cam.projectionMatrix,cam.matrixWorldInverse);U.N.value=2*R/U.size;U.On.value=1;
+  if(bv)bv.visible=false;sc.overrideMaterial=CHG.shMat;rd.setClearColor(0xffffff,1);rd.setRenderTarget(CHG.shRT);
+  try{rd.render(sc,cam);}finally{rd.setRenderTarget(prev);rd.setClearColor(0x000000,0);sc.overrideMaterial=null;if(bv)bv.visible=bOn;}}
+function charDraw(){if(!CH||!CHG.ready||CH.exporting)return;charCamUpdate();charBloomUpdate();if(CHG.root)CHG.root.updateMatrixWorld(true);charBodyLight();charBoneVisUpdate();charShadowPass();CHG.renderer.render(CHG.scene,CHG.cur);charSunDraw();charGuides();}
 function charRender(){if(!CH||CH.raf)return;CH.raf=requestAnimationFrame(()=>{if(CH){CH.raf=0;charDraw();}});}
 function charRebuild(){if(!CH||!CHG.ready)return;charApplyStyle();charBuild();charRender();}
 function charRebuildSoon(){if(!CH||CH.rb)return;CH.rb=requestAnimationFrame(()=>{if(CH){CH.rb=0;charRebuild();}});}
 function charResize(){if(!CHG.ready)return;const vp=$('#c-vp'),w=vp.clientWidth,h=vp.clientHeight;if(!w||!h)return;const dpr=Math.min(window.devicePixelRatio||1,2);CHG.renderer.setPixelRatio(dpr);CHG.renderer.setSize(w,h,false);const gc=$('#c-guides');gc.width=Math.round(w*dpr);gc.height=Math.round(h*dpr);for(const id of ['#c-sun','#c-flare']){const sn=$(id);if(sn){sn.width=gc.width;sn.height=gc.height;}}charRender();}
-function charFrame(){const L=charLayout(CH.rig),c=CH.cam;c.tx=0;c.ty=L.height/2;c.tz=0;c.view=Math.max(6,L.height*1.25);charRender();}
+function charFrame(){const L=charLayout(CH.rig),c=CH.cam;let cy=L.height/2,hgt=L.height;
+  /* frame what is actually there: a raised or crouched pose, or a prop, moves the figure off the standing height */
+  try{if(CHG.root){CHG.root.updateMatrixWorld(true);const b=new THREE.Box3().setFromObject(CHG.root);if(isFinite(b.min.y)&&isFinite(b.max.y)&&b.max.y>b.min.y){cy=(b.min.y+b.max.y)/2;hgt=Math.max(L.height*.9,b.max.y-b.min.y);}}}catch(e){}
+  c.tx=0;c.ty=cy;c.tz=0;c.view=Math.max(6,hgt*1.25);charRender();}
 function charStopAnim(){if(CH&&CH.animId){cancelAnimationFrame(CH.animId);CH.animId=0;}}
 function charSnapUI(){$$('#c-snap button[data-a]').forEach(b=>b.setAttribute('aria-pressed',String(!!CH&&CH.snap===b.dataset.a)));{const mb=$('#c-more');if(mb){const extra=!!CH&&!!CH.snap&&!['front','q','side','back','top'].includes(CH.snap),V=extra&&CAM_VIEWS.find(v=>v[0]===CH.snap);mb.setAttribute('aria-pressed',String(extra));mb.textContent=(V?V[1]:'More')+' \u25be';}}$$('#c-proj button').forEach(b=>b.setAttribute('aria-pressed',String(!!CH&&(b.dataset.m==='ortho')===CH.rig.view.ortho)));}
 function charSnapTo(name){
@@ -3277,19 +3548,28 @@ function charInitScene(){
     CHG.scene=new T.Scene();CHG.persp=new T.PerspectiveCamera(30,1,.5,400);CHG.orthoCam=new T.OrthographicCamera(-1,1,1,-1,1,300);
     const SUN=sunVec(),dl=new T.DirectionalLight(0xffe7a3,.75);dl.position.copy(SUN).multiplyScalar(10);CHG.scene.add(new T.AmbientLight(0xfff6df,.55),dl);CHG.sunDir=SUN;
     CHG.fillFlat=new T.MeshBasicMaterial({color:0xf4f6fa});CHG.fillShade=new T.MeshPhongMaterial({color:0xf4f6fa,specular:0x000000,shininess:0});
-    const HU=()=>({uLight:{value:SUN.clone()},uBase:{value:new T.Color(0xfbfbf8)},uInk:{value:new T.Color(0x111318)},uMid:{value:new T.Color(0xc4d4f0)},uAccent:{value:new T.Color(0xff3e9a)},uDeep:{value:new T.Color(0x6f86b8)},uPx:{value:5}});
-    CHG.fillHalf=new T.ShaderMaterial({uniforms:HU(),vertexShader:HATCH_VS,fragmentShader:HATCH_HEAD+HATCH_HALF});
-    CHG.fillStipple=new T.ShaderMaterial({uniforms:HU(),vertexShader:HATCH_VS,fragmentShader:HATCH_HEAD+SHADE_STIPPLE});
-    CHG.fillCircle=new T.ShaderMaterial({uniforms:HU(),vertexShader:HATCH_VS,fragmentShader:HATCH_HEAD+SHADE_CIRCLE});
-    CHG.fillScumble=new T.ShaderMaterial({uniforms:HU(),vertexShader:HATCH_VS,fragmentShader:HATCH_HEAD+SHADE_SCUMBLE});
-    CHG.fillRandom=new T.ShaderMaterial({uniforms:HU(),vertexShader:HATCH_VS,fragmentShader:HATCH_HEAD+SHADE_RANDOM});
-    CHG.fillToon3d=new T.ShaderMaterial({uniforms:HU(),vertexShader:HATCH_VS,fragmentShader:HATCH_HEAD+SHADE_TOON3D,extensions:{derivatives:true}});
-    CHG.fillToon2=new T.ShaderMaterial({uniforms:HU(),vertexShader:HATCH_VS,fragmentShader:HATCH_HEAD+SHADE_TOON2,extensions:{derivatives:true}});
-    CHG.fillToon3=new T.ShaderMaterial({uniforms:HU(),vertexShader:HATCH_VS,fragmentShader:HATCH_HEAD+SHADE_TOON3,extensions:{derivatives:true}});
-    CHG.fillToonSoft=new T.ShaderMaterial({uniforms:HU(),vertexShader:HATCH_VS,fragmentShader:HATCH_HEAD+SHADE_TOONSOFT});
-    CHG.fillBrush=new T.ShaderMaterial({uniforms:HU(),vertexShader:HATCH_VS2,fragmentShader:HATCH_HEAD+SHADE_BRUSH});
-    const PM=n=>new T.ShaderMaterial({uniforms:HU(),vertexShader:PAINT_VS,fragmentShader:'#define STYLE '+n+'\n'+PAINT_HEAD+PAINT_MAIN});
-    CHG.fillPaint=PM(1);CHG.fillLines=PM(2);CHG.fillScrib=PM(3);CHG.fillWater=PM(4);CHG.fillVerse=PM(5);
+    const HU=()=>({uSegA:{value:new T.Vector3(0,0,0)},uSegB:{value:new T.Vector3(0,1,0)},uLight:{value:SUN.clone()},uBase:{value:new T.Color(0xfbfbf8)},uInk:{value:new T.Color(0x111318)},uMid:{value:new T.Color(0xc4d4f0)},uAccent:{value:new T.Color(0xff3e9a)},uDeep:{value:new T.Color(0x6f86b8)},uPx:{value:5}});
+    CHG.fillHalf=new T.ShaderMaterial({uniforms:HU(),vertexShader:GV(HATCH_VS),fragmentShader:HATCH_HEAD+HATCH_HALF});
+    CHG.fillStipple=new T.ShaderMaterial({uniforms:HU(),vertexShader:GV(HATCH_VS),fragmentShader:HATCH_HEAD+SHADE_STIPPLE});
+    CHG.fillCircle=new T.ShaderMaterial({uniforms:HU(),vertexShader:GV(HATCH_VS),fragmentShader:HATCH_HEAD+SHADE_CIRCLE});
+    CHG.fillScumble=new T.ShaderMaterial({uniforms:HU(),vertexShader:GV(HATCH_VS),fragmentShader:HATCH_HEAD+SHADE_SCUMBLE});
+    CHG.fillRandom=new T.ShaderMaterial({uniforms:HU(),vertexShader:GV(HATCH_VS),fragmentShader:HATCH_HEAD+SHADE_RANDOM});
+    CHG.fillToon3d=new T.ShaderMaterial({uniforms:HU(),vertexShader:GV(HATCH_VS),fragmentShader:HATCH_HEAD+SHADE_TOON3D,extensions:{derivatives:true}});
+    CHG.fillToon2=new T.ShaderMaterial({uniforms:HU(),vertexShader:GV(HATCH_VS),fragmentShader:HATCH_HEAD+SHADE_TOON2,extensions:{derivatives:true}});
+    CHG.fillToon3=new T.ShaderMaterial({uniforms:HU(),vertexShader:GV(HATCH_VS),fragmentShader:HATCH_HEAD+SHADE_TOON3,extensions:{derivatives:true}});
+    CHG.fillToonSoft=new T.ShaderMaterial({uniforms:HU(),vertexShader:GV(HATCH_VS),fragmentShader:HATCH_HEAD+SHADE_TOONSOFT});
+    CHG.fillBrush=new T.ShaderMaterial({uniforms:HU(),vertexShader:GV(HATCH_VS2),fragmentShader:HATCH_HEAD+SHADE_BRUSH});
+    const PM=n=>new T.ShaderMaterial({uniforms:HU(),vertexShader:GV(PAINT_VS),fragmentShader:'#define STYLE '+n+'\n'+PAINT_HEAD+PAINT_MAIN});
+    CHG.fillPaint=PM(1);CHG.fillLines=PM(2);CHG.fillScrib=PM(3);CHG.fillWater=PM(4);CHG.fillVerse=PM(5);CHG.fillArcVerse=PM(7);
+    CHG.bodyMats=[CHG.fillHalf,CHG.fillStipple,CHG.fillCircle,CHG.fillScumble,CHG.fillRandom,CHG.fillToon3d,CHG.fillToon2,CHG.fillToon3,CHG.fillToonSoft,CHG.fillBrush,CHG.fillPaint,CHG.fillLines,CHG.fillScrib,CHG.fillWater,CHG.fillVerse,CHG.fillArcVerse];
+    /* part-to-part shadows: the figure is drawn once from the sun into a packed-RGBA depth map, and every figure shader reads it */
+    const SH_N=1024;
+    CHG.shRT=new T.WebGLRenderTarget(SH_N,SH_N,{minFilter:T.NearestFilter,magFilter:T.NearestFilter,format:T.RGBAFormat,type:T.UnsignedByteType,depthBuffer:true,stencilBuffer:false,generateMipmaps:false});
+    CHG.shCam=new T.OrthographicCamera(-1,1,1,-1,.1,100);
+    CHG.shMat=new T.ShaderMaterial({vertexShader:'varying float vD;void main(){vec4 p=projectionMatrix*modelViewMatrix*vec4(position,1.0);vD=p.z/p.w*0.5+0.5;gl_Position=p;}',
+      fragmentShader:'varying float vD;void main(){float d=clamp(vD,0.0,0.99999);vec4 e=fract(d*vec4(1.0,255.0,65025.0,16581375.0));e-=e.yzww*vec4(1.0/255.0,1.0/255.0,1.0/255.0,0.0);gl_FragColor=e;}',side:T.DoubleSide});
+    CHG.shU={M:{value:new T.Matrix4()},L:{value:SUN.clone()},N:{value:.03},T:{value:CHG.shRT.texture},On:{value:0},B:{value:.0012},K:{value:1.2/SH_N},size:SH_N};
+    CHG.bodyMats.forEach(m=>{m.defines={SHADOWED:1};const u=m.uniforms;u.uShM=CHG.shU.M;u.uShL=CHG.shU.L;u.uShN=CHG.shU.N;u.uShT=CHG.shU.T;u.uShOn=CHG.shU.On;u.uShB=CHG.shU.B;u.uShK=CHG.shU.K;});
     CHG.lineMat=new T.ShaderMaterial({uniforms:{uW:{value:.07},uColor:{value:new T.Color(0)}},side:T.BackSide,
       vertexShader:'attribute vec3 outN;uniform float uW;void main(){vec3 p=position+normalize(outN)*uW;gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.0);}',
       fragmentShader:'uniform vec3 uColor;void main(){gl_FragColor=vec4(uColor,1.0);}'});
@@ -3349,7 +3629,7 @@ function charSheetCanvasRaw(viewList){
     cam.position.copy(tgt).addScaledVector(dir,160);cam.up.set(0,1,0);cam.lookAt(tgt);cam.updateMatrixWorld(true);};
   /* the figure's real bounds decide the frame: wide poses (T-pose, hands overhead, crouch) used to be cropped at a fixed size.
      Every view gets the same scale, set by the view that needs the most room, so the figures stay comparable */
-  CHG.root.updateMatrixWorld(true);
+  CHG.root.updateMatrixWorld(true);charBodyLight();
   const box=new T.Box3().setFromObject(CHG.root),corners=[];
   for(const px of [box.min.x,box.max.x])for(const py of [box.min.y,box.max.y])for(const pz of [box.min.z,box.max.z])corners.push(new T.Vector3(px,py,pz));
   let hh=L.height*.6;
@@ -3359,7 +3639,7 @@ function charSheetCanvasRaw(viewList){
   rd.setPixelRatio(1);rd.setSize(W,H,false);
   views.forEach(([lab,yaw,pitch],i)=>{
     place(yaw,pitch);cam.left=-hh*W/H;cam.right=hh*W/H;cam.top=hh;cam.bottom=-hh;cam.near=1;cam.far=400;cam.updateProjectionMatrix();cam.updateMatrixWorld(true);
-    rd.render(CHG.scene,cam);x.drawImage(rd.domElement,i*W,0,W,H);
+    charShadowPass();rd.render(CHG.scene,cam);x.drawImage(rd.domElement,i*W,0,W,H);
     if(Math.abs(pitch)<60){x.save();x.beginPath();x.rect(i*W,0,W,H);x.clip();x.strokeStyle='rgba(90,110,190,.5)';x.fillStyle='rgba(60,80,150,.9)';x.font='11px system-ui,sans-serif';x.lineWidth=1;
       for(let k=0;k<=Math.ceil(L.height/L.headH);k++){const sy=H/2-((k*L.headH-tgt.y)/hh)*H/2;x.beginPath();x.moveTo(i*W,sy);x.lineTo(i*W+W,sy);x.stroke();x.fillText(String(k),i*W+6,sy-3);}
       x.restore();}
@@ -3404,21 +3684,22 @@ function buildCharPanel(){
     CHAR_PARTS.forEach(([k,l])=>{const b=document.createElement('button');b.type='button';b.textContent=l;b.setAttribute('aria-pressed',String(!!g.parts[k]));b.onclick=()=>{g.parts[k]=!g.parts[k];b.setAttribute('aria-pressed',String(g.parts[k]));charRebuildSoon();charMark();};tg.appendChild(b);});body.appendChild(tg);
     const L=charLayout(g),p=document.createElement('p');p.className='c-note';p.textContent=`Figure height: ${(L.height/L.headH).toFixed(1)} heads tall.`;body.appendChild(p);
   }else if(CH.tab==='pose'){
-    sec('Presets');if(CH.mocap&&CH.mocap.on){const nt=document.createElement('p');nt.className='c-note';nt.textContent='An imported animation is driving the figure. Touching a pose control stops it and uses your pose.';body.appendChild(nt);}const pg=document.createElement('div');pg.className='c-tg';POSE_PRESETS.forEach(([id,l,ov])=>{const b=document.createElement('button');b.type='button';b.textContent=l;b.onclick=()=>{charMocapOff();CH.rig.pose=charMerge(posebase(),ov);charRebuild();charMark();buildCharPanel();};pg.appendChild(b);});body.appendChild(pg);
+    sec('Presets');if(CH.mocap&&CH.mocap.on){const nt=document.createElement('p');nt.className='c-note';nt.textContent='An imported animation is driving the figure. Touching a pose control stops it and uses your pose.';body.appendChild(nt);}const pg=document.createElement('div');pg.className='c-tg';POSE_PRESETS.forEach(([id,l,ov])=>{const b=document.createElement('button');b.type='button';b.textContent=l;b.onclick=()=>{charMocapOff();CH.rig.pose=charMerge(posebase(),ov);charRebuild();charFrame();charMark();buildCharPanel();};pg.appendChild(b);});body.appendChild(pg);
     sec('Body');slider(['Body height','pose.drop',-1,1.2,.01]);slider(['Lean forward / back','pose.lean.0',-30,30,1]);slider(['Lean sideways','pose.lean.1',-20,20,1]);
     [['L','Left'],['R','Right']].forEach(([k,nm])=>{sec(nm+' arm');slider(['Swing forward','pose.arms.'+k+'.sh.0',-60,180,1]);slider(['Raise out','pose.arms.'+k+'.sh.1',-30,120,1]);slider(['Shoulder twist','pose.arms.'+k+'.sh.2',-90,90,1]);slider(['Elbow bend','pose.arms.'+k+'.el',0,150,1]);slider(['Forearm twist','pose.arms.'+k+'.elTw',-90,90,1]);slider(['Wrist bend','pose.arms.'+k+'.wr.0',-70,70,1]);slider(['Wrist tilt','pose.arms.'+k+'.wr.1',-30,30,1]);slider(['Hand roll','pose.arms.'+k+'.wr.2',-90,90,1]);slider(['Finger curl','pose.arms.'+k+'.fc',0,100,1]);slider(['Thumb curl','pose.arms.'+k+'.tc',0,100,1]);
       sec(nm+' leg');slider(['Hip forward','pose.legs.'+k+'.hip.0',-30,110,1]);slider(['Hip out','pose.legs.'+k+'.hip.1',-20,40,1]);slider(['Knee bend','pose.legs.'+k+'.knee',0,120,1]);});
     const rs=document.createElement('button');rs.type='button';rs.className='btn';rs.textContent='Reset pose';rs.onclick=()=>{charMocapOff();CH.rig.pose=posebase();charRebuild();charMark();buildCharPanel();};body.appendChild(rs);
   }else if(CH.tab==='view'){
     const pick=v=>{g.view.fill=v;charRebuild();charMark();buildCharPanel();};
-    sec('Painted');seg([['paint','Arcane brush'],['lines','Lines'],['scribbles','Scribbles'],['water','Watercolor']],g.view.fill,pick,true);
-    if(PAINTED.includes(g.view.fill)){sec('Palette');seg([['skin','Skin'],['jade','Jade'],['clay','Clay'],['dusk','Dusk']],g.view.palette,v=>{g.view.palette=v;charRebuild();charMark();buildCharPanel();});}
-    sec('Shading');seg([['flat','Flat'],['shaded','Smooth'],['halftone','Halftone'],['verse','Spider-Verse']],g.view.fill,pick,true);
+    sec('Painted');seg([['paint','Arcane brush'],['arcverse','Arcane + Verse'],['lines','Lines'],['scribbles','Scribbles'],['water','Watercolor']],g.view.fill,pick,true);
+    sec('Shading');seg([['flat','Flat'],['halftone','Halftone'],['verse','Spider-Verse']],g.view.fill,pick,true);
     sec('Toon / cel');seg([['toon2','Basic toon'],['toon3','3-tone toon'],['toonsoft','Soft toon'],['toon3d','3D toon']],g.view.fill,pick,true);
+    sec('Model colour');seg([['skin','Skin'],['jade','Jade'],['clay','Clay'],['dusk','Dusk']],g.view.palette,v=>{g.view.palette=v;charRebuild();charMark();buildCharPanel();});
     sec('Line colour');seg([['black','Black'],['blue','Blue pencil'],['red','Red pencil']],g.view.line,v=>{g.view.line=v;charRebuild();charMark();buildCharPanel();});
     sec('Line weight');slider(['Weight','view.weight',.02,.2,.005]);
     sec('Backdrop');const sw=document.createElement('div');sw.className='c-tg';BACKDROPS.forEach(([hex,l])=>{const b=document.createElement('button');b.type='button';b.textContent=l;b.style.background=hex;b.style.color='#2b2f3a';b.setAttribute('aria-pressed',String(g.view.backdrop===hex));b.onclick=()=>{g.view.backdrop=hex;charApplyBackdrop();charMark();buildCharPanel();};sw.appendChild(b);});body.appendChild(sw);
     sec('Sun and lens flare');seg([['off','Off'],['soft','Soft'],['glow','Glow']],g.view.sun,v=>{g.view.sun=v;charRender();charMark();buildCharPanel();});
+    sec('Cast shadows');seg([[true,'On'],[false,'Off']],g.view.shadows,v=>{g.view.shadows=v;charRender();charMark();buildCharPanel();});
     sec('Guides');seg([[true,'Head-height lines on'],[false,'Off']],g.view.guides,v=>{g.view.guides=v;charRender();charMark();buildCharPanel();});
     sec('Skeleton');seg([[true,'Show bones'],[false,'Off']],g.view.bones,v=>{g.view.bones=v;charBonesRefresh();charRender();charMark();buildCharPanel();});
     {const tr=charBoneTree(),dt=document.createElement('details');dt.className='hint';const sm=document.createElement('summary');sm.textContent=tr.length+' bones (Mixamo-style names)';const pre=document.createElement('pre');pre.style.cssText='font-size:11px;line-height:1.35;max-height:220px;overflow:auto;margin:6px 0 0;white-space:pre';pre.textContent=tr.join('\n');dt.append(sm,pre);body.appendChild(dt);}
@@ -3526,7 +3807,7 @@ async function motionExportFrames(o){
   const ui=progressUI('Building reference sheet'),tick=()=>new Promise(r=>setTimeout(r,0));
   const wasPlaying=m.playing,saveT=m.t,saveOn=m.on,oldPR=rd.getPixelRatio(),bv=CHG.boneVis,bOn=bv&&bv.visible;
   m.playing=false;cancelAnimationFrame(m._raf);ch.exporting=true;if(bv)bv.visible=false;
-  const pose=t=>{m.on=true;m.t=t;mocapApply(true);CHG.root.updateMatrixWorld(true);};
+  const pose=t=>{m.on=true;m.t=t;mocapApply(true);CHG.root.updateMatrixWorld(true);charBodyLight();};
   const hips=()=>{const b=ch.bones&&ch.bones.Hips;return b?new T.Vector3().setFromMatrixPosition(b.matrixWorld):new T.Vector3();};
   const base=(ch.rec.name||'character').replace(/[^\w\- ]+/g,'').trim().replace(/\s+/g,'-')||'character';
   let finished=false;
@@ -3551,7 +3832,7 @@ async function motionExportFrames(o){
       rd.setPixelRatio(1);rd.setSize(W,H,false);
       cam.position.copy(t).addScaledVector(dirs[vi].d,160);cam.up.set(0,1,0);cam.lookAt(t);
       cam.left=-hh*W/H;cam.right=hh*W/H;cam.top=hh;cam.bottom=-hh;cam.near=1;cam.far=400;cam.updateProjectionMatrix();cam.updateMatrixWorld(true);
-      rd.render(CHG.scene,cam);
+      charShadowPass();rd.render(CHG.scene,cam);
       const c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');
       if(bg){x.fillStyle=bg;x.fillRect(0,0,W,H);}
       x.drawImage(rd.domElement,0,0,W,H);
